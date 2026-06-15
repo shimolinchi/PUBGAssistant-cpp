@@ -1,0 +1,577 @@
+{
+    "minimap_rect": {
+        "top": 594,
+        "left": 1431,
+        "width": 457,
+        "height": 457
+    },
+    "pnt_color_mode": "normal",
+    "pnt_color_modes": {
+        "normal": {
+            "Yellow": {
+                "lower": [
+                    28,
+                    150,
+                    160
+                ],
+                "upper": [
+                    32,
+                    255,
+                    255
+                ],
+                "hex": "#ABA809"
+            },
+            "Orange": {
+                "lower": [
+                    8,
+                    160,
+                    160
+                ],
+                "upper": [
+                    12,
+                    255,
+                    255
+                ],
+                "hex": "#A04619"
+            },
+            "Blue": {
+                "lower": [
+                    99,
+                    120,
+                    160
+                ],
+                "upper": [
+                    103,
+                    255,
+                    255
+                ],
+                "hex": "#28749F"
+            },
+            "Green": {
+                "lower": [
+                    60,
+                    150,
+                    120
+                ],
+                "upper": [
+                    64,
+                    255,
+                    255
+                ],
+                "hex": "#2F8433"
+            }
+        },
+        "deuteranopia": {
+            "Yellow": {
+                "lower": [
+                    26,
+                    150,
+                    160
+                ],
+                "upper": [
+                    30,
+                    255,
+                    255
+                ],
+                "hex": "#B9AE15"
+            },
+            "Orange": {
+                "lower": [
+                    11,
+                    160,
+                    160
+                ],
+                "upper": [
+                    15,
+                    255,
+                    255
+                ],
+                "hex": "#A15519"
+            },
+            "Blue": {
+                "lower": [
+                    107,
+                    120,
+                    160
+                ],
+                "upper": [
+                    111,
+                    255,
+                    255
+                ],
+                "hex": "#0046BC"
+            },
+            "Green": {
+                "lower": [
+                    78,
+                    150,
+                    120
+                ],
+                "upper": [
+                    82,
+                    255,
+                    255
+                ],
+                "hex": "#01B377"
+            }
+        },
+        "protanopia": {
+            "Yellow": {
+                "lower": [
+                    26,
+                    150,
+                    160
+                ],
+                "upper": [
+                    30,
+                    255,
+                    255
+                ],
+                "hex": "#B9AE15"
+            },
+            "Orange": {
+                "lower": [
+                    10,
+                    160,
+                    160
+                ],
+                "upper": [
+                    14,
+                    255,
+                    255
+                ],
+                "hex": "#B3500D"
+            },
+            "Blue": {
+                "lower": [
+                    110,
+                    120,
+                    160
+                ],
+                "upper": [
+                    114,
+                    255,
+                    255
+                ],
+                "hex": "#1A3FA4"
+            },
+            "Green": {
+                "lower": [
+                    78,
+                    150,
+                    120
+                ],
+                "upper": [
+                    82,
+                    255,
+                    255
+                ],
+                "hex": "#109166"
+            }
+        },
+        "tritanopia": {
+            "Yellow": {
+                "lower": [
+                    26,
+                    150,
+                    160
+                ],
+                "upper": [
+                    30,
+                    255,
+                    255
+                ],
+                "hex": "#E3D43C"
+            },
+            "Orange": {
+                "lower": [
+                    3,
+                    160,
+                    160
+                ],
+                "upper": [
+                    7,
+                    255,
+                    255
+                ],
+                "hex": "#B14732"
+            },
+            "Blue": {
+                "lower": [
+                    105,
+                    120,
+                    160
+                ],
+                "upper": [
+                    109,
+                    255,
+                    255
+                ],
+                "hex": "#2E5689"
+            },
+            "Green": {
+                "lower": [
+                    87,
+                    150,
+                    120
+                ],
+                "upper": [
+                    91,
+                    255,
+                    255
+                ],
+                "hex": "#009995"
+            }
+        }
+    },
+    "map_rect": {
+        "left": 421.0,
+        "top": -0.5,
+        "side": 1080
+    },
+    "map_1km_pixels": 540,
+    "elevation_rect": {
+        "top": 80,
+        "left": 912,
+        "width": 120,
+        "height": 902
+    },
+    "hotkeys": {
+        "throw": "b",
+        "toggle_weapon_detection": "<f1>",
+        "toggle_display": "<f2>",
+        "toggle_recoil": "<f3>",
+        "measure_map": "<f4>",
+        "marker_prev": "q",
+        "marker_next": "e",
+        "toggle_equipment": "tab",
+        "fire_key": "end"
+    },
+    "detection_regions": {
+        "scope_region": {
+            "left": 295,
+            "top": 0,
+            "width": 1347,
+            "height": 1079
+        },
+        "weapon_region": {
+            "left": 880,
+            "top": 923,
+            "width": 157,
+            "height": 59
+        },
+        "stance_region": {
+            "left": 701,
+            "top": 971,
+            "width": 48,
+            "height": 59
+        },
+        "minimap_region": {
+            "left": 1428,
+            "top": 592,
+            "width": 459,
+            "height": 459
+        },
+        "largemap_region": {
+            "left": 420,
+            "top": 0,
+            "width": 1079,
+            "height": 1079
+        },
+        "elevation_region": {
+            "left": 899,
+            "top": 69,
+            "width": 124,
+            "height": 918
+        },
+        "compass_region": {
+            "left": 553,
+            "top": 0,
+            "width": 796,
+            "height": 77
+        },
+        "crosshair_region": {
+            "left": 628,
+            "top": 201,
+            "width": 676,
+            "height": 674
+        },
+        "weapon1_name_region": {
+            "left": 1369,
+            "top": 94,
+            "width": 237,
+            "height": 36
+        },
+        "weapon1_number_region": {
+            "left": 1333,
+            "top": 93,
+            "width": 33,
+            "height": 33
+        },
+        "weapon1_scope_region": {
+            "left": 1605,
+            "top": 114,
+            "width": 50,
+            "height": 50
+        },
+        "weapon1_grip_region": {
+            "left": 1436,
+            "top": 236,
+            "width": 50,
+            "height": 50
+        },
+        "weapon1_muzzle_region": {
+            "left": 1334,
+            "top": 236,
+            "width": 50,
+            "height": 50
+        },
+        "weapon1_stock_region": {
+            "left": 1758,
+            "top": 236,
+            "width": 50,
+            "height": 50
+        },
+        "weapon2_name_region": {
+            "left": 1369,
+            "top": 319,
+            "width": 238,
+            "height": 38
+        },
+        "weapon2_number_region": {
+            "left": 1333,
+            "top": 319,
+            "width": 33,
+            "height": 33
+        },
+        "weapon2_scope_region": {
+            "left": 1605,
+            "top": 340,
+            "width": 50,
+            "height": 50
+        },
+        "weapon2_grip_region": {
+            "left": 1436,
+            "top": 462,
+            "width": 50,
+            "height": 50
+        },
+        "weapon2_muzzle_region": {
+            "left": 1334,
+            "top": 462,
+            "width": 50,
+            "height": 50
+        },
+        "weapon2_stock_region": {
+            "left": 1757,
+            "top": 462,
+            "width": 50,
+            "height": 50
+        }
+    },
+    "map_scales": {
+        "minimap_100m_px": 65.0,
+        "largemap_1km_px": 150.0
+    },
+    "real_regions": {
+        "weapon1_name_region": {
+            "left": 1367,
+            "top": 89,
+            "width": 239,
+            "height": 43
+        },
+        "weapon1_number_region": {
+            "left": 1332,
+            "top": 92,
+            "width": 35,
+            "height": 35
+        },
+        "weapon2_name_region": {
+            "left": 1367,
+            "top": 318,
+            "width": 195,
+            "height": 39
+        },
+        "weapon2_number_region": {
+            "left": 1333,
+            "top": 318,
+            "width": 34,
+            "height": 34
+        },
+        "weapon2_scope_region": {
+            "left": 1605,
+            "top": 339,
+            "width": 52,
+            "height": 52
+        },
+        "weapon2_muzzle_region": {
+            "left": 1332,
+            "top": 461,
+            "width": 52,
+            "height": 52
+        },
+        "weapon2_grip_region": {
+            "left": 1434,
+            "top": 461,
+            "width": 52,
+            "height": 52
+        },
+        "weapon_region": {
+            "left": 858,
+            "top": 920,
+            "width": 203,
+            "height": 67
+        },
+        "weapon1_grip_region": {
+            "left": 1435,
+            "top": 235,
+            "width": 52,
+            "height": 52
+        },
+        "weapon1_muzzle_region": {
+            "left": 1333,
+            "top": 235,
+            "width": 52,
+            "height": 52
+        },
+        "weapon1_stock_region": {
+            "left": 1757,
+            "top": 235,
+            "width": 52,
+            "height": 52
+        },
+        "weapon2_stock_region": {
+            "left": 1756,
+            "top": 461,
+            "width": 53,
+            "height": 53
+        },
+        "minimap_region": {
+            "left": 1430,
+            "top": 593,
+            "width": 457,
+            "height": 457
+        },
+        "largemap_region": {
+            "left": 421,
+            "top": 0,
+            "width": 1079,
+            "height": 1079
+        },
+        "elevation_region": {
+            "left": 923,
+            "top": 70,
+            "width": 65,
+            "height": 910
+        },
+        "crosshair_region": {
+            "left": 574,
+            "top": 154,
+            "width": 771,
+            "height": 771
+        },
+        "stance_region": {
+            "left": 696,
+            "top": 968,
+            "width": 51,
+            "height": 64
+        },
+        "scope_top_edge_4x_region": {
+            "left": 931,
+            "top": 149,
+            "width": 58,
+            "height": 125
+        },
+        "scope_top_edge_6x_region": {
+            "left": 920,
+            "top": 117,
+            "width": 81,
+            "height": 152
+        },
+        "scope_top_edge_8x_region": {
+            "left": 916,
+            "top": 35,
+            "width": 86,
+            "height": 159
+        },
+        "weapon1_scope_region": {
+            "left": 1605,
+            "top": 113,
+            "width": 51,
+            "height": 51
+        }
+    },
+    "real_scales": {},
+    "region_scaling_settings": {
+        "weapon_region": {
+            "width": 200,
+            "height": 67
+        },
+        "weapon1_name_region": {
+            "width": 240,
+            "height": 43
+        },
+        "weapon2_name_region": {
+            "width": 195,
+            "height": 37
+        },
+        "stance_region": {
+            "width": 53,
+            "height": 67
+        }
+    },
+    "pnt_colors": {
+        "Yellow": {
+            "lower": [
+                28,
+                150,
+                160
+            ],
+            "upper": [
+                32,
+                255,
+                255
+            ],
+            "hex": "#ABA809"
+        },
+        "Orange": {
+            "lower": [
+                8,
+                160,
+                160
+            ],
+            "upper": [
+                12,
+                255,
+                255
+            ],
+            "hex": "#A04619"
+        },
+        "Blue": {
+            "lower": [
+                99,
+                120,
+                160
+            ],
+            "upper": [
+                103,
+                255,
+                255
+            ],
+            "hex": "#28749F"
+        },
+        "Green": {
+            "lower": [
+                60,
+                150,
+                120
+            ],
+            "upper": [
+                64,
+                255,
+                255
+            ],
+            "hex": "#2F8433"
+        }
+    }
+}

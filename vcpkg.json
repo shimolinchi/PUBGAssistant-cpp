@@ -1,0 +1,25 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
+  "name": "pubgassistant-cpp",
+  "version-string": "0.1.0",
+  "builtin-baseline": "44819aa2a6c10e56065e2b0330e7d6c89d1d2574",
+  "dependencies": [
+    "nlohmann-json",
+    {
+      "name": "opencv4",
+      "default-features": false,
+      "features": [
+        "jpeg",
+        "png"
+      ]
+    },
+    {
+      "name": "qtbase",
+      "default-features": false,
+      "features": [
+        "gui",
+        "widgets"
+      ]
+    }
+  ]
+}

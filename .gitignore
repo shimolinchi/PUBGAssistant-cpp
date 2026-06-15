@@ -1,0 +1,35 @@
+# Visual Studio / CMake build output
+.vs/
+out/
+build/
+.build/
+.tmp/
+.vcpkg-downloads/
+x64/
+Win32/
+Debug/
+Release/
+RelWithDebInfo/
+MinSizeRel/
+
+# Visual Studio generated files
+*.user
+*.suo
+*.VC.db
+*.VC.opendb
+*.db-shm
+*.db-wal
+*.ipch
+*.tlog/
+*.recipe
+*.lastbuildstate
+
+# Local debug output
+*.log
+PUBGAssi.db*/
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+*.tmp
+*.bak

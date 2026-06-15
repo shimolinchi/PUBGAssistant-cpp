@@ -1,0 +1,59 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 24,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "windows-x64-debug",
+      "displayName": "Windows x64 Debug",
+      "description": "MSVC x64 Debug build using Visual Studio's bundled vcpkg.",
+      "generator": "Ninja",
+      "architecture": {
+        "value": "x64",
+        "strategy": "external"
+      },
+      "binaryDir": "C:/Projects/PUBGAssistant-cpp/.build/debug",
+      "installDir": "C:/Projects/PUBGAssistant-cpp/.build/install/debug",
+      "environment": {
+        "PATH": "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin;C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja;$penv{PATH}",
+        "TEMP": "C:/Projects/PUBGAssistant-cpp/.tmp",
+        "TMP": "C:/Projects/PUBGAssistant-cpp/.tmp",
+        "VCPKG_DOWNLOADS": "C:/Projects/PUBGAssistant-cpp/.vcpkg-downloads",
+        "HTTP_PROXY": "http://127.0.0.1:7890",
+        "HTTPS_PROXY": "http://127.0.0.1:7890"
+      },
+      "cacheVariables": {
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "CMAKE_MAKE_PROGRAM": "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe",
+        "CMAKE_TOOLCHAIN_FILE": "C:/Program Files/Microsoft Visual Studio/18/Community/VC/vcpkg/scripts/buildsystems/vcpkg.cmake",
+        "VCPKG_TARGET_TRIPLET": "x64-windows"
+      }
+    },
+    {
+      "name": "windows-x64-release",
+      "displayName": "Windows x64 Release",
+      "description": "MSVC x64 Release build using Visual Studio's bundled vcpkg.",
+      "inherits": "windows-x64-debug",
+      "binaryDir": "C:/Projects/PUBGAssistant-cpp/.build/release",
+      "installDir": "C:/Projects/PUBGAssistant-cpp/.build/install/release",
+      "cacheVariables": {}
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "windows-x64-debug",
+      "displayName": "Build Windows x64 Debug",
+      "configurePreset": "windows-x64-debug",
+      "configuration": "Debug"
+    },
+    {
+      "name": "windows-x64-release",
+      "displayName": "Build Windows x64 Release",
+      "configurePreset": "windows-x64-release",
+      "configuration": "Release"
+    }
+  ]
+}

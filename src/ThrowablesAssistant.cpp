@@ -1,0 +1,181 @@
+#include "ThrowablesAssistant.hpp"
+
+#include "BuildConfig.hpp"
+
+#include <iomanip>
+#include <sstream>
+
+namespace pubg {
+
+namespace {
+// 把秒数格式化为固定一位小数，避免 std::to_string + substr 截出位数不稳定的文本。
+std::string oneDecimal(double value) {
+    std::ostringstream out;
+    out << std::fixed << std::setprecision(1) << value;
+    return out.str();
+}
+} // namespace
+
+ThrowablesAssistant::ThrowablesAssistant(Config& config, RegionManager& regions, MinimapRadar& minimap)
+    : config_(config), regions_(regions), minimap_(minimap), ballistics_(config), hex_(config.markerHex()) {
+    overlay_.create(L"PUBGAssistant Throwables", regions_.screenWidth(), regions_.screenHeight(), true);
+    worker_ = std::thread(&ThrowablesAssistant::workerLoop, this);
+}
+
+ThrowablesAssistant::~ThrowablesAssistant() {
+    running_ = false;
+    if (worker_.joinable()) worker_.join();
+}
+
+void ThrowablesAssistant::setEnabled(bool enabled) {
+    enabled_ = enabled;
+    overlay_.show(enabled);
+    if (!enabled) overlay_.clear();
+}
+
+void ThrowablesAssistant::setSelectedColor(const std::string& color) {
+    std::lock_guard lock(mutex_);
+    selected_color_ = color;
+}
+
+void ThrowablesAssistant::setMarkerHex(std::unordered_map<std::string, std::string> hex) {
+    std::lock_guard lock(mutex_);
+    hex_ = std::move(hex);
+}
+
+bool ThrowablesAssistant::shouldJumpThrow(double distance) const {
+    const auto cfg = config_.read([](const Json& root) {
+        return root.value("throwables_config", Json::object());
+    });
+    return distance >= cfg.value("jump_min_dist", 50.0) && distance <= cfg.value("jump_max_dist", 80.0);
+}
+
+void ThrowablesAssistant::showWarning(const std::string& text) {
+    warning_text_ = text;
+    warning_until_ = nowSeconds() + 2.0;
+}
+
+void ThrowablesAssistant::onThrowKey(bool pressed) {
+    if (!enabled_) return;
+    std::lock_guard lock(mutex_);
+    if (!pressed) {
+        return;
+    }
+    if (!InputController::isLeftMouseDown()) {
+        showWarning("[ 左键未按下，无法触发瞬爆 ]");
+        return;
+    }
+    const auto dists = minimap_.measuredDistance();
+    const double dist = dists.count(selected_color_) ? dists.at(selected_color_) : 0.0;
+    if (dist <= 0.0) {
+        showWarning("[ 未检测到 " + selected_color_ + " 标点 ]");
+        return;
+    }
+    const auto cfg = config_.read([](const Json& root) {
+        return root.value("throwables_config", Json::object());
+    });
+    const double jump_min = cfg.value("jump_min_dist", 50.0);
+    const double jump_max = cfg.value("jump_max_dist", 80.0);
+    if (dist > jump_max) {
+        showWarning("[ 目标距离 " + std::to_string(static_cast<int>(std::round(dist))) + "m 太远 ]");
+        return;
+    }
+    jump_throw_ = shouldJumpThrow(dist);
+    if (dist >= jump_min && jump_throw_) {
+        const auto jump_dists = cfg.value("jump_calib_dists", Json::array());
+        const auto jump_times = cfg.value("jump_calib_times", Json::array());
+        if (jump_dists.empty() || jump_times.empty()) {
+            showWarning("[ 跳投参数未配置 ]");
+            return;
+        }
+    }
+    const double cook = ballistics_.throwableCookTime(dist, jump_throw_);
+    cooking_ = true;
+    throw_at_ = nowSeconds() + std::max(0.0, cook);
+#if PUBG_ENABLE_INPUT_CONTROL
+    const int pull_key = InputController::parseVirtualKey("r");
+    InputController::keyDown(pull_key);
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    InputController::keyUp(pull_key);
+    InputController::mouseLeftDown();
+#endif
+}
+
+void ThrowablesAssistant::executeThrow(bool jump_throw) {
+#if PUBG_ENABLE_INPUT_CONTROL
+    InputController::mouseLeftUp();
+    if (jump_throw) {
+        const auto cfg = config_.read([](const Json& root) {
+            return root.value("throwables_config", Json::object());
+        });
+        const int delay_ms = static_cast<int>(cfg.value("jump_delay_after_release", 0.3) * 1000.0);
+        std::this_thread::sleep_for(std::chrono::milliseconds(std::max(0, delay_ms)));
+        InputController::keyDown(VK_SPACE);
+        std::this_thread::sleep_for(std::chrono::milliseconds(35));
+        InputController::keyUp(VK_SPACE);
+    }
+#else
+    (void)jump_throw;
+#endif
+}
+
+void ThrowablesAssistant::render() {
+    if (!enabled_) return;
+    const auto dists = minimap_.measuredDistance();
+    std::string color;
+    std::unordered_map<std::string, std::string> hex;
+    {
+        std::lock_guard lock(mutex_);
+        color = selected_color_;
+        hex = hex_;
+        if (!warning_text_.empty() && nowSeconds() <= warning_until_) {
+            const double cx = regions_.screenWidth() / 2.0;
+            const double y = regions_.screenHeight() * 0.75;
+            overlay_.setCommands({OverlayCommand{OverlayCommand::Type::Text, cx - 120.0, y, 0, 0, 0,
+                                                  warning_text_, hexToBgr("#E74C3C"), 1, 16}});
+            overlay_.pumpMessages();
+            return;
+        }
+        if (!warning_text_.empty() && nowSeconds() > warning_until_) {
+            warning_text_.clear();
+        }
+    }
+    const double dist = dists.count(color) ? dists.at(color) : 0.0;
+    if (dist <= 0.0) {
+        overlay_.clear();
+        return;
+    }
+    const bool jump = shouldJumpThrow(dist);
+    const double ratio = ballistics_.throwableElevationRatio(dist, jump);
+    const double cook = ballistics_.throwableCookTime(dist, jump);
+    const double cx = regions_.screenWidth() / 2.0;
+    const double y = regions_.screenHeight() * ratio;
+    auto bgr = hexToBgr(hex.count(color) ? hex[color] : "#FFFFFF");
+    std::vector<OverlayCommand> cmds;
+    cmds.push_back({OverlayCommand::Type::Line, cx - 26, y, cx + 26, y, 0, "", bgr, 3});
+    cmds.push_back({OverlayCommand::Type::Text, cx + 34, y - 10, 0, 0, 0,
+                    std::to_string(static_cast<int>(std::round(dist))) + "m " + oneDecimal(cook) + "s",
+                    bgr, 1, 16});
+    overlay_.setCommands(std::move(cmds));
+    overlay_.pumpMessages();
+}
+
+void ThrowablesAssistant::workerLoop() {
+    while (running_) {
+        bool fire = false;
+        bool jump = false;
+        {
+            std::lock_guard lock(mutex_);
+            if (cooking_ && nowSeconds() >= throw_at_) {
+                cooking_ = false;
+                fire = true;
+                jump = jump_throw_;
+            }
+        }
+        if (fire) executeThrow(jump);
+        render();
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+}
+
+} // namespace pubg
