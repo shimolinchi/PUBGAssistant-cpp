@@ -32,6 +32,8 @@ public:
 
     // 创建全屏或指定尺寸 overlay。click_through=true 时鼠标事件穿透到游戏窗口。
     bool create(const std::wstring& title, int width, int height, bool click_through = true);
+    bool create(const std::wstring& title, int width, int height, bool click_through,
+                bool exclude_from_capture);
 
     // 显示或隐藏窗口。
     void show(bool visible);

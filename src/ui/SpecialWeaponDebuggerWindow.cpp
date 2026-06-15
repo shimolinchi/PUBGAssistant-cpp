@@ -11,42 +11,74 @@ namespace pubg::ui {
 SpecialWeaponDebuggerWindow::SpecialWeaponDebuggerWindow(Config& config, QWidget* parent)
     : QWidget(parent), config_(config) {
     setWindowTitle(QStringLiteral("特殊武器参数调试"));
-    resize(840, 500);
+    setObjectName("specialDbgRoot");
+    setStyleSheet(
+        "#specialDbgRoot{background:#FFFFFF;}"
+        "QLabel{color:#030712;font-family:'Microsoft YaHei';}"
+        "QComboBox{background:#FFFFFF;color:#030712;border:1px solid #9CA3AF;border-radius:4px;padding:3px 6px;selection-background-color:#DBEAFE;selection-color:#030712;}"
+        "QComboBox QAbstractItemView{background:#FFFFFF;color:#030712;border:1px solid #9CA3AF;selection-background-color:#DBEAFE;selection-color:#030712;}"
+        "QLineEdit{background:#FFFFFF;color:#030712;border:1px solid #9CA3AF;border-radius:4px;padding:3px 6px;}"
+        "QPushButton{background:#EEF2F7;color:#030712;border:1px solid #9CA3AF;border-radius:5px;padding:6px 0;}"
+        "QPushButton:hover{background:#E2E8F0;}"
+        "QPushButton:pressed{background:#CBD5E1;}"
+    );
+    setWindowOpacity(0.85);
+    resize(720, 480);
     buildUi();
     renderCurrentWeapon();
 }
 
 void SpecialWeaponDebuggerWindow::buildUi() {
     auto* root = new QHBoxLayout(this);
+    root->setContentsMargins(14, 14, 14, 14);
+    root->setSpacing(12);
     auto* left = new QWidget(this);
-    left->setFixedWidth(190);
+    left->setFixedWidth(196);
     auto* ll = new QVBoxLayout(left);
+    ll->setContentsMargins(0, 0, 0, 0);
+    ll->setSpacing(8);
+
     auto* title = new QLabel(QStringLiteral("特殊武器"), this);
-    title->setStyleSheet("font-size:18px;font-weight:700;");
+    title->setStyleSheet("font-size:17px;font-weight:700;");
     ll->addWidget(title);
+
     weapon_combo_ = new QComboBox(this);
     weapon_combo_->addItems({QStringLiteral("火箭筒"), "VSS", QStringLiteral("十字弩"), QStringLiteral("迫击炮"), QStringLiteral("投掷物"), "C4"});
     ll->addWidget(weapon_combo_);
+
     throw_mode_combo_ = new QComboBox(this);
     throw_mode_combo_->addItems({QStringLiteral("普通投掷"), QStringLiteral("跳投")});
     ll->addWidget(throw_mode_combo_);
+
     auto* add = new QPushButton(QStringLiteral("添加标点"), this);
     ll->addWidget(add);
     auto* save = new QPushButton(QStringLiteral("保存并应用"), this);
     ll->addWidget(save);
+
     status_label_ = new QLabel(QStringLiteral("就绪"), this);
+    status_label_->setWordWrap(true);
+    status_label_->setStyleSheet("color:#1D4ED8;font-size:12px;font-weight:700;");
     ll->addWidget(status_label_);
     ll->addStretch();
+
+    auto* hint = new QLabel(QStringLiteral("操作提示\n- 拖拽控制点：修改数值\n- 左键双击空白：新增控制点\n- 右键双击控制点：删除\n- 曲线型武器横轴为距离(m)"), this);
+    hint->setWordWrap(true);
+    hint->setStyleSheet("color:#111827;font-size:12px;background:#F8FAFC;border:1px solid #D1D5DB;border-radius:6px;padding:8px;");
+    ll->addWidget(hint);
+
     curve_editor_ = new CurveEditor(this);
     right_panel_ = curve_editor_;
     right_panel_->setStyleSheet("background:#FFFFFF;border:1px solid #E5E7EB;color:#6B7280;");
     root->addWidget(left);
     root->addWidget(right_panel_, 1);
+
     connect(weapon_combo_, &QComboBox::currentTextChanged, this, [this] { renderCurrentWeapon(); });
     connect(throw_mode_combo_, &QComboBox::currentTextChanged, this, [this] { renderCurrentWeapon(); });
     connect(add, &QPushButton::clicked, this, &SpecialWeaponDebuggerWindow::addPoint);
     connect(save, &QPushButton::clicked, this, &SpecialWeaponDebuggerWindow::saveAndApply);
-    connect(curve_editor_, &CurveEditor::curveChanged, this, [this] { status_label_->setText(QStringLiteral("曲线已修改，点击保存并应用。")); });
+    connect(curve_editor_, &CurveEditor::curveChanged, this, [this] {
+        status_label_->setText(QStringLiteral("曲线已修改，点击保存并应用。"));
+    });
 }
 
 void SpecialWeaponDebuggerWindow::renderCurrentWeapon() {
@@ -61,19 +93,21 @@ void SpecialWeaponDebuggerWindow::renderCurrentWeapon() {
     }
     curve_editor_->show();
     throw_mode_combo_->setVisible(w == QStringLiteral("投掷物"));
-    if (w == QStringLiteral("火箭筒")) bindCurve("rocket_config", "calib_dists", "calib_ratios", QColor("#2563EB"));
-    else if (w == "VSS") bindCurve("vss_config", "calib_dists", "calib_drops_ratio", QColor("#16A34A"));
-    else if (w == QStringLiteral("十字弩")) bindCurve("crossbow_config", "calib_dists", "calib_drops_ratio", QColor("#EA580C"));
+    if (w == QStringLiteral("火箭筒")) bindCurve("rocket_config", "calib_dists", "calib_ratios", QColor("#2563EB"), QStringLiteral("下坠比例"));
+    else if (w == "VSS") bindCurve("vss_config", "calib_dists", "calib_drops_ratio", QColor("#16A34A"), QStringLiteral("下坠比例"));
+    else if (w == QStringLiteral("十字弩")) bindCurve("crossbow_config", "calib_dists", "calib_drops_ratio", QColor("#EA580C"), QStringLiteral("下坠比例"));
     else if (w == QStringLiteral("投掷物")) bindThrowables(throw_mode_combo_->currentText() == QStringLiteral("跳投"));
-    else if (w == QStringLiteral("迫击炮")) bindParams("mortar_config", {{"a_param", QStringLiteral("上坡修正 a")}, {"b_param", QStringLiteral("下坡修正 b")}});
+    else if (w == QStringLiteral("迫击炮")) bindParams("mortar_config", {{"a_param", QStringLiteral("上坠修正 a")}, {"b_param", QStringLiteral("下坠修正 b")}});
     else if (w == "C4") bindParams("c4_config", {{"target_speed", QStringLiteral("推荐起步速度 km/h")}, {"jump_distance_threshold", QStringLiteral("推荐跳车距离 m")}});
     status_label_->setText(QStringLiteral("当前：") + w);
 }
 
-void SpecialWeaponDebuggerWindow::bindCurve(const std::string& config_key, const std::string& x_key, const std::string& y_key, const QColor& color) {
+void SpecialWeaponDebuggerWindow::bindCurve(const std::string& config_key, const std::string& x_key, const std::string& y_key, const QColor& color, const QString& label) {
     active_config_ = config_key;
     active_x_ = x_key;
     active_y_ = y_key;
+    active_color_ = color;
+    active_label_ = label;
     xs_.clear();
     ys_.clear();
     const auto cfg = config_.read([&](const Json& data) {
@@ -81,7 +115,7 @@ void SpecialWeaponDebuggerWindow::bindCurve(const std::string& config_key, const
     });
     if (cfg.contains(x_key)) for (const auto& v : cfg[x_key]) xs_.push_back(v.get<double>());
     if (cfg.contains(y_key)) for (const auto& v : cfg[y_key]) ys_.push_back(v.get<double>());
-    curve_editor_->setCurves({CurveEditor::Curve{QString::fromStdString(y_key), color, &xs_, &ys_}});
+    curve_editor_->setCurves({CurveEditor::Curve{label, color, &xs_, &ys_}});
 }
 
 void SpecialWeaponDebuggerWindow::bindThrowables(bool jump) {
@@ -100,7 +134,7 @@ void SpecialWeaponDebuggerWindow::bindThrowables(bool jump) {
     if (cfg.contains(active_y2_)) for (const auto& v : cfg[active_y2_]) ys2_.push_back(v.get<double>());
     curve_editor_->setCurves({
         CurveEditor::Curve{QStringLiteral("抬高高度"), QColor("#7C3AED"), &xs_, &ys_},
-        CurveEditor::Curve{QStringLiteral("瞬爆时间"), QColor("#EA580C"), &xs_, &ys2_},
+        CurveEditor::Curve{QStringLiteral("爆炸时间"), QColor("#EA580C"), &xs_, &ys2_},
     });
 }
 
@@ -109,7 +143,7 @@ void SpecialWeaponDebuggerWindow::bindParams(const std::string& config_key, cons
     active_x_.clear();
     active_y_.clear();
     auto* panel = new QWidget(this);
-    panel->setStyleSheet("background:#FFFFFF;color:#111827;");
+    panel->setStyleSheet("background:#FFFFFF;color:#030712;QLineEdit{background:#FFFFFF;color:#030712;border:1px solid #9CA3AF;border-radius:4px;padding:3px 6px;}");
     auto* form = new QFormLayout(panel);
     const auto cfg = config_.read([&](const Json& data) {
         return data.value(config_key, Json::object());
@@ -139,10 +173,10 @@ void SpecialWeaponDebuggerWindow::addPoint() {
     if (!active_y2_.empty()) {
         curve_editor_->setCurves({
             CurveEditor::Curve{QStringLiteral("抬高高度"), QColor("#7C3AED"), &xs_, &ys_},
-            CurveEditor::Curve{QStringLiteral("瞬爆时间"), QColor("#EA580C"), &xs_, &ys2_},
+            CurveEditor::Curve{QStringLiteral("爆炸时间"), QColor("#EA580C"), &xs_, &ys2_},
         });
     } else {
-        curve_editor_->setCurves({CurveEditor::Curve{QString::fromStdString(active_y_), QColor("#2563EB"), &xs_, &ys_}});
+        curve_editor_->setCurves({CurveEditor::Curve{active_label_, active_color_, &xs_, &ys_}});
     }
 }
 

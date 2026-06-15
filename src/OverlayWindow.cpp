@@ -60,6 +60,11 @@ OverlayWindow::~OverlayWindow() {
 }
 
 bool OverlayWindow::create(const std::wstring& title, int width, int height, bool click_through) {
+    return create(title, width, height, click_through, true);
+}
+
+bool OverlayWindow::create(const std::wstring& title, int width, int height, bool click_through,
+                           bool exclude_from_capture) {
     width_ = width;
     height_ = height;
 #ifdef _WIN32
@@ -86,11 +91,18 @@ bool OverlayWindow::create(const std::wstring& title, int width, int height, boo
         return false;
     }
     ShowWindow(hwnd_, SW_SHOW);
+    if (exclude_from_capture) {
+        constexpr DWORD kWdaExcludeFromCapture = 0x00000011;
+        if (!SetWindowDisplayAffinity(hwnd_, kWdaExcludeFromCapture)) {
+            SetWindowDisplayAffinity(hwnd_, WDA_MONITOR);
+        }
+    }
     renderLayered();
     return true;
 #else
     (void)title;
     (void)click_through;
+    (void)exclude_from_capture;
     return false;
 #endif
 }

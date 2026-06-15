@@ -2,7 +2,10 @@
 
 #include "BuildConfig.hpp"
 
+#include <algorithm>
+#include <cmath>
 #include <iomanip>
+#include <numbers>
 #include <sstream>
 
 namespace pubg {
@@ -148,14 +151,28 @@ void ThrowablesAssistant::render() {
     const bool jump = shouldJumpThrow(dist);
     const double ratio = ballistics_.throwableElevationRatio(dist, jump);
     const double cook = ballistics_.throwableCookTime(dist, jump);
+    const auto cfg = config_.read([](const Json& root) {
+        return root.value("throwables_config", Json::object());
+    });
+    const double total_time = std::max(0.1, cfg.value("grenade_total_time", 5.0));
+    const double arc_radius = regions_.screenWidth() * cfg.value("arc_radius_ratio", 0.097);
     const double cx = regions_.screenWidth() / 2.0;
+    const double cy = regions_.screenHeight() / 2.0;
     const double y = regions_.screenHeight() * ratio;
     auto bgr = hexToBgr(hex.count(color) ? hex[color] : "#FFFFFF");
     std::vector<OverlayCommand> cmds;
-    cmds.push_back({OverlayCommand::Type::Line, cx - 26, y, cx + 26, y, 0, "", bgr, 3});
+    cmds.push_back({OverlayCommand::Type::Line, cx, cy, cx, regions_.screenHeight() * 0.9, 0, "", hexToBgr("#FFFFFF"), 1, 18, 255});
+    cmds.push_back({OverlayCommand::Type::Line, cx - 30, y, cx + 30, y, 0, "", bgr, 1});
     cmds.push_back({OverlayCommand::Type::Text, cx + 34, y - 10, 0, 0, 0,
-                    std::to_string(static_cast<int>(std::round(dist))) + "m " + oneDecimal(cook) + "s",
+                    std::to_string(static_cast<int>(std::round(dist))) + "m",
                     bgr, 1, 16});
+    constexpr double arc_span = 50.0 * std::numbers::pi / 180.0;
+    const double clamped_cook = std::clamp(cook, 0.0, total_time);
+    const double angle = arc_span * 0.5 - (clamped_cook / total_time) * arc_span;
+    const double mark_x = cx + std::cos(angle) * arc_radius;
+    const double mark_y = cy + std::sin(angle) * arc_radius;
+    cmds.push_back({OverlayCommand::Type::Text, mark_x + 10, mark_y - 7, 0, 0, 0,
+                    oneDecimal(cook) + "s", bgr, 1, 16});
     overlay_.setCommands(std::move(cmds));
     overlay_.pumpMessages();
 }

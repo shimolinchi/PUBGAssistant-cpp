@@ -9,13 +9,14 @@ namespace pubg::ui {
 RegionCalibrationOverlay::RegionCalibrationOverlay(RegionManager& regions, QString target_name, Mode mode, bool force_square, QWidget* parent)
     : QWidget(parent), regions_(regions), target_name_(std::move(target_name)), mode_(mode), force_square_(force_square) {
     setWindowFlags(Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint);
-    setAttribute(Qt::WA_TranslucentBackground, false);
+    setAttribute(Qt::WA_TranslucentBackground, true);
+    setWindowOpacity(0.99);
     setCursor(Qt::CrossCursor);
 }
 
 void RegionCalibrationOverlay::paintEvent(QPaintEvent*) {
     QPainter p(this);
-    p.fillRect(rect(), QColor(128, 128, 128, 150));
+    p.fillRect(rect(), QColor(0, 0, 0, 3));
     p.setPen(QPen(mode_ == Mode::Scale ? QColor("#2ECC71") : QColor("#E74C3C"), 3));
     if (!dragging_ && start_.isNull() && current_.isNull()) return;
     if (mode_ == Mode::Scale) {

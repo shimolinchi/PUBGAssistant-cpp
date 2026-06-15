@@ -16,7 +16,7 @@ MinimapRadar::MinimapRadar(Config& config, RegionManager& regions, int fps)
     for (const auto& c : colors_) {
         distances_[c.name] = 0.0;
     }
-    overlay_.create(L"PUBGAssistant Minimap", regions_.screenWidth(), regions_.screenHeight(), true);
+    overlay_.create(L"PUBGAssistant Minimap", regions_.screenWidth(), regions_.screenHeight(), true, true);
 }
 
 MinimapRadar::~MinimapRadar() {

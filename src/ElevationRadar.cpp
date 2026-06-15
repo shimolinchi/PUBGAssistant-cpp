@@ -5,6 +5,13 @@ namespace pubg {
 ElevationRadar::ElevationRadar(Config& config, RegionManager& regions, int fps)
     : config_(config), regions_(regions), fps_(fps), colors_(config.markerColors()) {
     point_templates_ = TemplateMatcher::loadAlphaBinaryTemplates(config_.paths().templatePath("pnt/elevation"));
+    if (point_templates_.empty()) {
+        point_templates_ = TemplateMatcher::loadAlphaBinaryTemplates(config_.paths().templatePath("pnt"));
+    }
+    for (const auto& tpl : point_templates_) {
+        max_tpl_w_ = std::max(max_tpl_w_, tpl.cols);
+        max_tpl_h_ = std::max(max_tpl_h_, tpl.rows);
+    }
     overlay_.create(L"PUBGAssistant Elevation", regions_.screenWidth(), regions_.screenHeight(), true);
 }
 
@@ -42,6 +49,45 @@ ElevationMap ElevationRadar::measuredElevations() const {
     return elevations_;
 }
 
+ElevationRadar::Match ElevationRadar::matchMarkerInMask(const cv::Mat& mask) const {
+    if (point_templates_.empty() || cv::countNonZero(mask) == 0) {
+        return {};
+    }
+    cv::Mat search;
+    cv::dilate(mask, search, kernel_, {-1, -1}, 1);
+    std::vector<std::vector<cv::Point>> contours;
+    cv::findContours(search, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+
+    Match best;
+    for (const auto& contour : contours) {
+        const cv::Rect bound = cv::boundingRect(contour);
+        if (bound.area() < 4) {
+            continue;
+        }
+        const int x1 = std::max(0, bound.x - max_tpl_w_);
+        const int y1 = std::max(0, bound.y - max_tpl_h_);
+        const int x2 = std::min(mask.cols, bound.x + bound.width + max_tpl_w_);
+        const int y2 = std::min(mask.rows, bound.y + bound.height + max_tpl_h_);
+        const cv::Mat roi = mask(cv::Rect(x1, y1, x2 - x1, y2 - y1));
+
+        for (const auto& tpl : point_templates_) {
+            if (tpl.empty() || roi.rows < tpl.rows || roi.cols < tpl.cols) {
+                continue;
+            }
+            cv::Mat res;
+            cv::matchTemplate(roi, tpl, res, cv::TM_CCOEFF_NORMED);
+            double max_val = 0.0;
+            cv::Point max_loc;
+            cv::minMaxLoc(res, nullptr, &max_val, nullptr, &max_loc);
+            if (std::isfinite(max_val) && max_val >= 0.55 && max_val > best.score) {
+                best.score = max_val;
+                best.y = y1 + max_loc.y + tpl.rows;
+            }
+        }
+    }
+    return best;
+}
+
 void ElevationRadar::run() {
     ScreenCapture capture;
     while (!stop_) {
@@ -69,18 +115,8 @@ void ElevationRadar::run() {
         for (const auto& c : colors) {
             cv::Mat mask;
             cv::inRange(hsv, c.lower_hsv, c.upper_hsv, mask);
-            std::vector<std::vector<cv::Point>> contours;
-            cv::findContours(mask, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
-            double best_y = -1.0;
-            double best_area = 0.0;
-            for (const auto& contour : contours) {
-                const double area = cv::contourArea(contour);
-                if (area > best_area) {
-                    auto b = cv::boundingRect(contour);
-                    best_area = area;
-                    best_y = b.y + b.height / 2.0;
-                }
-            }
+            const auto match = matchMarkerInMask(mask);
+            const double best_y = match.y;
             if (best_y >= 0.0) {
                 const double ratio = best_y / std::max(1, rect->height);
                 next[c.name] = ratio;

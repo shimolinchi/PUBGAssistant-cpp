@@ -73,6 +73,7 @@ if(WIN32)
         UNICODE
         _UNICODE
     )
+    target_compile_options(PUBGAssistantCpp PRIVATE /utf-8)
     target_link_libraries(PUBGAssistantCpp PRIVATE
         user32
         gdi32

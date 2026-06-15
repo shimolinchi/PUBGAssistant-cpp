@@ -3,6 +3,7 @@
 #include <QGridLayout>
 #include <QHBoxLayout>
 #include <QIcon>
+#include <QApplication>
 #include <QKeyEvent>
 #include <QFrame>
 #include <QLineEdit>
@@ -13,6 +14,7 @@
 #include <QStringList>
 #include <QVBoxLayout>
 
+#include <algorithm>
 #include <tuple>
 #include <utility>
 
@@ -85,7 +87,10 @@ void MainWindow::buildUi() {
     buildCalibrationTab(addTab(QStringLiteral("校准区域")));
     buildKeyTab(addTab(QStringLiteral("按键设置")));
     selectTab(0);
-    QTimer::singleShot(0, this, [this] { applyNativeRoundedRegion(); });
+    QTimer::singleShot(0, this, [this] {
+        applyNativeRoundedRegion();
+        applyCaptureExclusion();
+    });
 }
 
 void MainWindow::applyNativeRoundedRegion() {
@@ -95,6 +100,17 @@ void MainWindow::applyNativeRoundedRegion() {
     HRGN region = CreateRoundRectRgn(0, 0, width() + 1, height() + 1, 36, 36);
     if (region && !SetWindowRgn(hwnd, region, TRUE)) {
         DeleteObject(region);
+    }
+#endif
+}
+
+void MainWindow::applyCaptureExclusion() {
+#ifdef _WIN32
+    HWND hwnd = reinterpret_cast<HWND>(winId());
+    if (!hwnd) return;
+    constexpr DWORD kWdaExcludeFromCapture = 0x00000011;
+    if (!SetWindowDisplayAffinity(hwnd, kWdaExcludeFromCapture)) {
+        SetWindowDisplayAffinity(hwnd, WDA_MONITOR);
     }
 #endif
 }
@@ -343,6 +359,7 @@ void MainWindow::buildCalibrationTab(QWidget* tab) {
 void MainWindow::buildKeyTab(QWidget* tab) {
     tab->setFixedSize(262, 299);
     QVector<std::tuple<QString, QString, bool>> rows{
+        {QStringLiteral("窗口显示开关"), "toggle_window", true},
         {QStringLiteral("手雷瞬爆"), "throw", true},
         {QStringLiteral("辅助显示开关"), "toggle_display", true},
         {QStringLiteral("大地图测距"), "measure_map", true},
@@ -358,49 +375,55 @@ void MainWindow::buildKeyTab(QWidget* tab) {
         auto it = hotkeys.find(action.toStdString());
         return it == hotkeys.end() ? fallback : it->second;
     };
+    // 10 行紧凑排布：行距压到 26px，最后一行约到 y=263，正好压在底部保存/恢复按钮(y=267)之上，不溢出窗口。
+    const int row_step = 26;
+    const int value_x = 126;
+    const int record_x = 209;
+    const int record_h = 22;
     for (int row_index = 0; row_index < rows.size(); ++row_index) {
         const auto& row = rows[row_index];
         const QString label_text = std::get<0>(row);
         const QString action = std::get<1>(row);
         const bool editable = std::get<2>(row);
-        const int y = 3 + row_index * 28;
+        const int y = 3 + row_index * row_step;
         auto* line = new QWidget(tab);
-        line->setGeometry(0, y, 262, 26);
+        line->setGeometry(0, y, 262, 24);
 
         auto* desc = new QLabel(label_text, tab);
-        desc->setGeometry(0, y, 120, 25);
+        desc->setGeometry(0, y, 120, 24);
         desc->setStyleSheet("color:#333333;font-family:'Microsoft YaHei';font-size:13px;font-weight:700;");
         if (action == "marker_pair") {
             auto* prev = new QLabel(formatHotkey(hotkeyValue("marker_prev", "q")), tab);
             auto* next = new QLabel(formatHotkey(hotkeyValue("marker_next", "e")), tab);
-            prev->setGeometry(90, y + 2, 28, 21);
-            next->setGeometry(159, y + 2, 28, 21);
+            prev->setGeometry(value_x, y + 2, 28, 20);
+            next->setGeometry(value_x + 68, y + 2, 28, 20);
             prev->setStyleSheet("color:#2563EB;font-family:Consolas;font-size:13px;font-weight:700;");
             next->setStyleSheet("color:#2563EB;font-family:Consolas;font-size:13px;font-weight:700;");
             hotkey_labels_["marker_prev"] = prev;
             hotkey_labels_["marker_next"] = next;
             auto* prev_btn = new RoundedButton(QStringLiteral("录制"), tab);
-            prev_btn->configure(44, 26, 12, 14);
-            prev_btn->setGeometry(108, y, 44, 26);
+            prev_btn->configure(44, record_h, 11, 13);
+            prev_btn->setGeometry(value_x + 24, y + 1, 44, record_h);
             auto* next_btn = new RoundedButton(QStringLiteral("录制"), tab);
-            next_btn->configure(50, 26, 12, 14);
-            next_btn->setGeometry(208, y, 50, 26);
+            next_btn->configure(50, record_h, 11, 13);
+            next_btn->setGeometry(record_x, y + 1, 50, record_h);
             connect(prev_btn, &QPushButton::clicked, this, [this] { beginCaptureHotkey("marker_prev"); });
             connect(next_btn, &QPushButton::clicked, this, [this] { beginCaptureHotkey("marker_next"); });
         } else {
+            const std::string fallback = action == "fire_key" ? "end"
+                : action == "toggle_window" ? "<home>"
+                : "";
             const QString display = editable
-                ? formatHotkey(hotkeyValue(action, action == "fire_key" ? "end" : ""))
+                ? formatHotkey(hotkeyValue(action, fallback))
                 : QStringLiteral("鼠标左键 + 中键");
             auto* value = new QLabel(display, tab);
-            value->setGeometry(0, y + 2, 140, 21);
-            value->adjustSize();
-            value->move(desc->x() + desc->sizeHint().width() + 6, y + 2);
+            value->setGeometry(value_x, y + 2, 80, 20);
             value->setStyleSheet("color:#2563EB;font-family:Consolas;font-size:13px;font-weight:700;");
             if (editable) {
                 hotkey_labels_[action] = value;
                 auto* rec = new RoundedButton(QStringLiteral("录制"), tab);
-                rec->configure(50, 26, 12, 14);
-                rec->setGeometry(208, y, 50, 26);
+                rec->configure(50, record_h, 11, 13);
+                rec->setGeometry(record_x, y + 1, 50, record_h);
                 connect(rec, &QPushButton::clicked, this, [this, action] { beginCaptureHotkey(action); });
             }
         }
@@ -599,6 +622,33 @@ void MainWindow::keyPressEvent(QKeyEvent* event) {
             if (!modifiers.isEmpty()) {
                 combo = modifiers.join("+") + "+" + key;
             }
+            const auto existing_hotkeys = config_.hotkeys();
+            const std::string combo_std = combo.toStdString();
+            const std::string action_std = capturing_action_.toStdString();
+            auto hotkeyOr = [&](const std::string& key_name, const std::string& fallback) {
+                const auto it = existing_hotkeys.find(key_name);
+                return it == existing_hotkeys.end() ? fallback : it->second;
+            };
+            const bool conflict = std::any_of(existing_hotkeys.begin(), existing_hotkeys.end(), [&](const auto& item) {
+                return item.first != action_std && item.second == combo_std;
+            });
+            if (conflict || (action_std == "fire_key" && combo_std == hotkeyOr("toggle_window", "<home>")) ||
+                (action_std == "toggle_window" && combo_std == hotkeyOr("fire_key", "end"))) {
+                const QString action = capturing_action_;
+                if (hotkey_labels_.contains(action)) {
+                    hotkey_labels_[action]->setText(QStringLiteral("按键冲突"));
+                    QTimer::singleShot(1000, this, [this, action] {
+                        if (hotkey_labels_.contains(action)) {
+                            const auto stored = config_.read([&](const Json& data) {
+                                return data.value("hotkeys", Json::object()).value(action.toStdString(), std::string(""));
+                            });
+                            hotkey_labels_[action]->setText(formatHotkey(stored));
+                        }
+                    });
+                }
+                capturing_action_.clear();
+                return;
+            }
             config_.write([&](Json& data) {
                 data["hotkeys"][capturing_action_.toStdString()] = combo.toStdString();
             });
@@ -625,7 +675,10 @@ void MainWindow::saveHotkeys() {
 }
 
 void MainWindow::closeEvent(QCloseEvent* event) {
-    if (callbacks_.shutdown) callbacks_.shutdown();
+    if (!closing_) {
+        closing_ = true;
+        QApplication::quit();
+    }
     QMainWindow::closeEvent(event);
 }
 
@@ -637,6 +690,7 @@ void MainWindow::resizeEvent(QResizeEvent* event) {
 void MainWindow::resetDefaultHotkeys() {
     config_.write([](Json& data) {
         data["hotkeys"] = Json{
+            {"toggle_window", "<home>"},
             {"throw", "b"},
             {"toggle_weapon_detection", "<f1>"},
             {"toggle_display", "<f2>"},

@@ -69,8 +69,23 @@ void LargeMapRadar::setDisplay(bool visible) {
 }
 
 void LargeMapRadar::setMarkerColors(std::vector<MarkerColor> colors) {
-    std::lock_guard lock(mutex_);
-    colors_ = std::move(colors);
+    bool waiting = false;
+    bool calculating = false;
+    {
+        std::lock_guard lock(mutex_);
+        colors_ = std::move(colors);
+        waiting = waiting_click_;
+        calculating = calculating_;
+    }
+    // 切换色盲模式后立即重绘，让大地图测距的四个圆角矩形和迫击炮助手一样即时变色。
+    // renderHud 内部会重新加锁，所以必须在释放 mutex_ 之后再调用；同时保留等待/计算中的提示文案。
+    if (waiting) {
+        renderHud("点击大地图中的自己位置");
+    } else if (calculating) {
+        renderHud("计算中...");
+    } else {
+        renderHud();
+    }
 }
 
 void LargeMapRadar::toggleMode() {

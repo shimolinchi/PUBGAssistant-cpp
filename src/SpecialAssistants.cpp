@@ -1,5 +1,8 @@
 #include "SpecialAssistants.hpp"
 
+#include <algorithm>
+#include <numbers>
+
 namespace pubg {
 
 namespace {
@@ -36,7 +39,81 @@ AssistHudLayout assistHudLayout(const RegionManager& regions) {
     }
     return layout;
 }
+
+int scaledOddKernel(double base, double scale, int min_value) {
+    int value = std::max(min_value, static_cast<int>(std::round(base * scale)));
+    if (value % 2 == 0) {
+        ++value;
+    }
+    return value;
+}
 } // namespace
+
+std::optional<std::pair<double, double>> SpecialAssistants::detectCrosshairCenter(ScreenCapture& capture) const {
+    const auto rect = regions_.getRealRegion("crosshair_region");
+    if (!rect || !rect->valid()) {
+        return std::nullopt;
+    }
+    cv::Mat bgr = capture.grabBgr(*rect);
+    if (bgr.empty()) {
+        return std::nullopt;
+    }
+    constexpr double kMaxProcessSide = 180.0;
+    const double max_side = static_cast<double>(std::max(bgr.cols, bgr.rows));
+    const double scale = max_side > kMaxProcessSide ? kMaxProcessSide / max_side : 1.0;
+    cv::Mat work;
+    if (scale < 1.0) {
+        cv::resize(bgr, work, cv::Size(), scale, scale, cv::INTER_AREA);
+    } else {
+        work = bgr;
+    }
+    cv::Mat gray;
+    cv::cvtColor(work, gray, cv::COLOR_BGR2GRAY);
+    cv::Mat thresh;
+    cv::threshold(gray, thresh, 25, 255, cv::THRESH_BINARY);
+    const int open_size = scaledOddKernel(5.0, scale, 3);
+    const int close_size = scaledOddKernel(21.0, scale, 7);
+    const cv::Mat open_kernel = cv::getStructuringElement(cv::MORPH_ELLIPSE, {open_size, open_size});
+    const cv::Mat close_kernel = cv::getStructuringElement(cv::MORPH_ELLIPSE, {close_size, close_size});
+    cv::morphologyEx(thresh, thresh, cv::MORPH_OPEN, open_kernel);
+    cv::morphologyEx(thresh, thresh, cv::MORPH_CLOSE, close_kernel);
+
+    std::vector<std::vector<cv::Point>> contours;
+    cv::findContours(thresh, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+    if (contours.empty()) {
+        return std::nullopt;
+    }
+    const auto best = std::max_element(contours.begin(), contours.end(), [](const auto& a, const auto& b) {
+        return cv::contourArea(a) < cv::contourArea(b);
+    });
+    const double area = cv::contourArea(*best);
+    const double roi_area = static_cast<double>(thresh.cols) * thresh.rows;
+    if (area <= roi_area * 0.08 || area >= roi_area * 0.85) {
+        return std::nullopt;
+    }
+    cv::Point2f center;
+    float radius = 0.0f;
+    cv::minEnclosingCircle(*best, center, radius);
+    const double circle_area = std::numbers::pi * radius * radius;
+    if (circle_area <= 0.0 || area / circle_area <= 0.7) {
+        return std::nullopt;
+    }
+    const double inv_scale = 1.0 / scale;
+    return std::pair<double, double>{rect->left + center.x * inv_scale, rect->top + center.y * inv_scale};
+}
+
+std::optional<std::pair<double, double>> SpecialAssistants::cachedCrosshairCenter() {
+    const double now = nowSeconds();
+    if (cached_crosshair_center_ && now - last_crosshair_sample_ < 0.08) {
+        return cached_crosshair_center_;
+    }
+    last_crosshair_sample_ = now;
+    ScreenCapture capture;
+    if (auto detected = detectCrosshairCenter(capture)) {
+        cached_crosshair_center_ = detected;
+    }
+    return cached_crosshair_center_;
+}
 
 SpecialAssistants::SpecialAssistants(Config& config, RegionManager& regions, MinimapRadar& minimap, ElevationRadar& elevation)
     : config_(config), regions_(regions), minimap_(minimap), elevation_(elevation), ballistics_(config), hex_(config.markerHex()) {
@@ -88,7 +165,7 @@ void SpecialAssistants::drawRocket(const DistanceMap& dists, const std::unordere
         const double ratio = ballistics_.rocketRatio(dist);
         const double y = std::min(cy + ratio * line_len, regions_.screenHeight() - 10.0);
         const auto bgr = hexToBgr(hex.count(color) ? hex.at(color) : "#FFFFFF");
-        cmds.push_back({OverlayCommand::Type::Line, cx - 28, y, cx + 28, y, 0, "", bgr, 3});
+        cmds.push_back({OverlayCommand::Type::Line, cx - 28, y, cx + 28, y, 0, "", bgr, 2});
         cmds.push_back({OverlayCommand::Type::Text, cx + 36, y - 10, 0, 0, 0, std::to_string(static_cast<int>(std::round(dist))) + "m", bgr, 1, 18});
     }
 }
@@ -110,17 +187,22 @@ void SpecialAssistants::drawVss(const DistanceMap& dists, const std::unordered_m
 
 void SpecialAssistants::drawCrossbow(const DistanceMap& dists, const std::unordered_map<std::string, std::string>& hex,
                                      std::vector<OverlayCommand>& cmds) {
-    const double cx = regions_.screenWidth() / 2.0;
-    const double cy = regions_.screenHeight() / 2.0;
+    const auto tracked = cachedCrosshairCenter();
+    const double cx = tracked ? tracked->first : regions_.screenWidth() / 2.0;
+    const double cy = tracked ? tracked->second : regions_.screenHeight() / 2.0;
+    if (tracked) {
+        const auto black = hexToBgr("#000000");
+        cmds.push_back({OverlayCommand::Type::Line, cx - 7, cy - 7, cx + 7, cy + 7, 0, "", black, 2});
+        cmds.push_back({OverlayCommand::Type::Line, cx - 7, cy + 7, cx + 7, cy - 7, 0, "", black, 2});
+    }
     for (const auto& [color, dist] : dists) {
-        if (dist <= 0.0 || dist > 350.0) {
+        if (dist <= 30.0 || dist > 350.0) {
             continue;
         }
         const double y = cy + ballistics_.crossbowDropRatio(dist) * regions_.screenHeight();
         const auto bgr = hexToBgr(hex.count(color) ? hex.at(color) : "#FFFFFF");
-        cmds.push_back({OverlayCommand::Type::Line, cx - 9, y - 9, cx + 9, y + 9, 0, "", bgr, 2});
-        cmds.push_back({OverlayCommand::Type::Line, cx - 9, y + 9, cx + 9, y - 9, 0, "", bgr, 2});
-        cmds.push_back({OverlayCommand::Type::Text, cx + 24, y - 9, 0, 0, 0, std::to_string(static_cast<int>(std::round(dist))) + "m", bgr, 1, 16});
+        cmds.push_back({OverlayCommand::Type::Line, cx - 28, y, cx + 28, y, 0, "", bgr, 2});
+        cmds.push_back({OverlayCommand::Type::Text, cx + 36, y - 10, 0, 0, 0, std::to_string(static_cast<int>(std::round(dist))) + "m", bgr, 1, 16});
     }
 }
 

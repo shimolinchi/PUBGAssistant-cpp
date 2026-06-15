@@ -37,6 +37,10 @@ private:
     QPointF toScreen(double x, double y, double min_x, double max_x, double min_y, double max_y) const;
     std::pair<double, double> fromScreen(const QPointF& p, double min_x, double max_x, double min_y, double max_y) const;
     std::tuple<int, int, double> nearestPoint(const QPointF& p) const;
+    QString displayLabel(const QString& label) const;
+    double interpolatedY(const std::vector<double>& xs, const std::vector<double>& ys, double x) const;
+    void deletePoint(int curve_index, int point_index);
+    void sortSharedAxis(std::vector<double>* shared_xs);
 
     std::vector<Curve> curves_;
     int drag_curve_ = -1;

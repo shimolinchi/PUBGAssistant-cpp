@@ -22,7 +22,7 @@ private:
     void buildUi();
     void renderCurrentWeapon();
     void saveAndApply();
-    void bindCurve(const std::string& config_key, const std::string& x_key, const std::string& y_key, const QColor& color);
+    void bindCurve(const std::string& config_key, const std::string& x_key, const std::string& y_key, const QColor& color, const QString& label);
     void bindThrowables(bool jump);
     void bindParams(const std::string& config_key, const std::vector<std::pair<std::string, QString>>& fields);
     void addPoint();
@@ -36,6 +36,8 @@ private:
     std::string active_config_;
     std::string active_x_;
     std::string active_y_;
+    QColor active_color_{"#2563EB"};
+    QString active_label_;
     std::vector<double> xs_;
     std::vector<double> ys_;
     std::string active_y2_;

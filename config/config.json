@@ -245,7 +245,8 @@
         "marker_prev": "q",
         "marker_next": "e",
         "toggle_equipment": "tab",
-        "fire_key": "end"
+        "toggle_window": "<home>",
+        "fire_key": "<f8>"
     },
     "detection_regions": {
         "scope_region": {

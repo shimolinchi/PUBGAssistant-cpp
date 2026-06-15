@@ -69,6 +69,12 @@ std::string App::currentMarkerColor() const {
 }
 
 void App::registerHotkeys() {
+    // F1~F12 被键盘钩子吞掉、不传给系统；但当游戏（默认 TslGame.exe，可在 config.json 的
+    // game_process 改）或本程序自身处于前台时放行，使游戏能收到 F8 开火、本程序能录制 F 键。
+    hotkeys_.setPassthroughProcess(config_.read([](const Json& data) {
+        return data.value("game_process", std::string("TslGame.exe"));
+    }));
+    // Home 等键照常放行，只触发对应功能。
     hotkeys_.addHotkey("toggle_weapon_detection", hotkeyCombo("toggle_weapon_detection", "<f1>"), [this] { toggleWeaponDetection(); });
     hotkeys_.addHotkey("toggle_display", hotkeyCombo("toggle_display", "<f2>"), [this] { toggleDisplay(); });
 #if PUBG_ENABLE_INPUT_CONTROL
@@ -78,7 +84,7 @@ void App::registerHotkeys() {
     hotkeys_.addHotkey("measure_map", hotkeyCombo("measure_map", "<f4>"), [this] {
         large_map_->toggleMode();
     });
-    hotkeys_.addHotkey("home", VK_HOME, [this] {
+    hotkeys_.addHotkey("toggle_window", hotkeyCombo("toggle_window", "<home>"), [this] {
         if (main_window_) {
             QMetaObject::invokeMethod(main_window_, [this] { main_window_->toggleWindowVisible(); }, Qt::QueuedConnection);
         }
@@ -250,6 +256,16 @@ void App::migrateLegacyDefaultHotkeys() {
                 data["hotkeys"][action] = next;
                 changed = true;
             }
+        }
+        auto& hotkeys = data["hotkeys"];
+        if (!hotkeys.contains("toggle_window") || !hotkeys["toggle_window"].is_string()) {
+            hotkeys["toggle_window"] = "<home>";
+            changed = true;
+        }
+        if (hotkeys.value("fire_key", std::string("end")) == hotkeys.value("toggle_window", std::string("<home>"))) {
+            hotkeys["fire_key"] = "end";
+            hotkeys["toggle_window"] = "<home>";
+            changed = true;
         }
     });
     if (changed) {
@@ -582,7 +598,10 @@ int App::run() {
     main_window_ = &window;
     window.show();
     hotkeys_.start();
-    return QApplication::exec();
+    const int code = QApplication::exec();
+    main_window_ = nullptr;
+    shutdown();
+    return code;
 }
 
 } // namespace pubg

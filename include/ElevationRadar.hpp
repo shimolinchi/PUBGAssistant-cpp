@@ -27,6 +27,13 @@ public:
     [[nodiscard]] ElevationMap measuredElevations() const;
 
 private:
+    struct Match {
+        double y = -1.0;
+        double score = 0.0;
+    };
+
+    [[nodiscard]] Match matchMarkerInMask(const cv::Mat& mask) const;
+
     // 后台循环：截图、HSV 阈值、轮廓定位、计算 y/height 比例。
     void run();
 
@@ -38,6 +45,9 @@ private:
     int fps_ = 30;
     std::vector<MarkerColor> colors_;
     std::vector<cv::Mat> point_templates_;
+    int max_tpl_w_ = 1;
+    int max_tpl_h_ = 1;
+    cv::Mat kernel_ = cv::Mat::ones(3, 3, CV_8U);
 
     // 后台线程和显示开关。
     mutable std::mutex mutex_;

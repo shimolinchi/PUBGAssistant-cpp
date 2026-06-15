@@ -100,6 +100,7 @@ private:
     void openScaleCalibrator();
     void openRecoilDebugger();
     void openSpecialWeaponDebugger();
+    void applyCaptureExclusion();
     void beginCaptureHotkey(const QString& action);
     void saveHotkeys();
     void resetDefaultHotkeys();
@@ -131,6 +132,7 @@ private:
     bool display_enabled_ = false;
     bool recoil_enabled_ = false;
     bool debug_overlay_enabled_ = false;
+    bool closing_ = false;
     QString capturing_action_;
     RoundedButton* btn_weapon_detect_ = nullptr;
     RoundedButton* btn_display_ = nullptr;

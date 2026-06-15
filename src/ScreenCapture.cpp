@@ -27,7 +27,7 @@ cv::Mat ScreenCapture::grabBgr(const Rect& rect) const {
     HBITMAP bitmap = CreateCompatibleBitmap(screen_dc_, rect.width, rect.height);
     HGDIOBJ old = SelectObject(mem_dc, bitmap);
 
-    BitBlt(mem_dc, 0, 0, rect.width, rect.height, screen_dc_, rect.left, rect.top, SRCCOPY | CAPTUREBLT);
+    BitBlt(mem_dc, 0, 0, rect.width, rect.height, screen_dc_, rect.left, rect.top, SRCCOPY);
 
     BITMAPINFOHEADER bi{};
     bi.biSize = sizeof(BITMAPINFOHEADER);
