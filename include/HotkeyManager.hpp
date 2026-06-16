@@ -3,7 +3,6 @@
 #include "InputController.hpp"
 
 #include <array>
-#include <condition_variable>
 #include <deque>
 #include <mutex>
 
@@ -75,11 +74,11 @@ private:
         bool mouse = false;      // 主键是鼠标按钮，需走轮询。
     };
 
-    // 把回调投递到 dispatch 线程执行，避免在钩子线程里做重活。
+    // 把钩子线程产生的回调投递到队列，由 pollLoop 排空执行，避免在钩子线程里做重活。
     void enqueue(std::function<void()> fn);
-    void dispatchLoop();
 
-    // 鼠标按钮轮询线程（以及非 Windows 平台的全量轮询回退）。
+    // 鼠标按钮轮询线程；同时排空并执行钩子线程投递的键盘回调。
+    // 非 Windows 平台退化为对所有键的全量轮询。
     void pollLoop();
 
 #ifdef _WIN32
@@ -98,13 +97,11 @@ private:
     std::mutex mutex_;
     std::atomic_bool running_{false};
 
-    // dispatch：串行执行排队的回调。
-    std::thread dispatch_worker_;
+    // 钩子线程投递、pollLoop 排空的回调队列。
     std::mutex queue_mutex_;
-    std::condition_variable queue_cv_;
     std::deque<std::function<void()>> queue_;
 
-    // 鼠标轮询线程。
+    // 鼠标轮询 + 回调执行线程。
     std::thread poll_worker_;
 
     // 前台为该进程或本程序自身时放行 F 键（受 mutex_ 保护）。

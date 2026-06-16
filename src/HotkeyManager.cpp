@@ -59,7 +59,6 @@ void HotkeyManager::start() {
         return;
     }
     running_ = true;
-    dispatch_worker_ = std::thread(&HotkeyManager::dispatchLoop, this);
     poll_worker_ = std::thread(&HotkeyManager::pollLoop, this);
 #ifdef _WIN32
     hook_worker_ = std::thread(&HotkeyManager::hookLoop, this);
@@ -76,9 +75,7 @@ void HotkeyManager::stop() {
         PostThreadMessage(hook_thread_id_, WM_QUIT, 0, 0);
     }
 #endif
-    queue_cv_.notify_all();
     if (poll_worker_.joinable()) poll_worker_.join();
-    if (dispatch_worker_.joinable()) dispatch_worker_.join();
 #ifdef _WIN32
     if (hook_worker_.joinable()) hook_worker_.join();
     hook_thread_id_ = 0;
@@ -113,31 +110,12 @@ bool HotkeyManager::isFunctionKey(int vk) {
 }
 
 void HotkeyManager::enqueue(std::function<void()> fn) {
-    {
-        std::lock_guard lock(queue_mutex_);
-        queue_.push_back(std::move(fn));
-    }
-    queue_cv_.notify_one();
-}
-
-void HotkeyManager::dispatchLoop() {
-    while (true) {
-        std::function<void()> fn;
-        {
-            std::unique_lock lock(queue_mutex_);
-            queue_cv_.wait(lock, [this] { return !queue_.empty() || !running_; });
-            if (!running_ && queue_.empty()) {
-                return;
-            }
-            fn = std::move(queue_.front());
-            queue_.pop_front();
-        }
-        if (fn) fn();
-    }
+    std::lock_guard lock(queue_mutex_);
+    queue_.push_back(std::move(fn));
 }
 
 void HotkeyManager::pollLoop() {
-    // 仅轮询鼠标按钮型热键/状态监听（键盘键由钩子处理）。
+    // 轮询鼠标按钮型热键/状态监听（键盘键由钩子处理），并排空钩子线程投递的键盘回调。
     // 非 Windows 平台没有钩子，这里退化为对所有键的轮询。
     while (running_) {
         std::vector<Callback> callbacks;
@@ -164,7 +142,16 @@ void HotkeyManager::pollLoop() {
         for (const auto& cb : callbacks) {
             if (cb) cb();
         }
-        std::this_thread::sleep_for(std::chrono::milliseconds(15));
+        // 排空钩子线程投递的键盘热键回调，在本轮询线程上执行（与鼠标回调同一线程，简化时序）。
+        std::deque<std::function<void()>> pending;
+        {
+            std::lock_guard lock(queue_mutex_);
+            pending.swap(queue_);
+        }
+        for (auto& fn : pending) {
+            if (fn) fn();
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(12));
     }
 }
 

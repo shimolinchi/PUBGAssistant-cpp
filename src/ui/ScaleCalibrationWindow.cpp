@@ -1,14 +1,12 @@
 #include "ui/ScaleCalibrationWindow.hpp"
 
-#include <QFileDialog>
+#include <QCloseEvent>
 #include <QFormLayout>
 #include <QHBoxLayout>
 #include <QImage>
-#include <QPointer>
 #include <QPushButton>
 #include <QSignalBlocker>
 #include <QVBoxLayout>
-#include <QCloseEvent>
 
 #include <algorithm>
 #include <cmath>
@@ -105,13 +103,60 @@ cv::Mat toBgr(const cv::Mat& input) {
     return bgr;
 }
 
-cv::Mat outlinePreview(const cv::Mat& input) {
+cv::Mat toGray(const cv::Mat& input) {
+    if (input.empty()) return {};
+    cv::Mat gray;
+    if (input.channels() == 4) {
+        cv::cvtColor(input, gray, cv::COLOR_BGRA2GRAY);
+    } else if (input.channels() == 3) {
+        cv::cvtColor(input, gray, cv::COLOR_BGR2GRAY);
+    } else {
+        gray = input;
+    }
+    return gray;
+}
+
+cv::Mat binaryPreview(const cv::Mat& binary) {
+    if (binary.empty()) return {};
+    cv::Mat mask;
+    if (binary.type() == CV_8U) {
+        mask = binary;
+    } else {
+        binary.convertTo(mask, CV_8U);
+    }
+    cv::Mat preview(mask.rows, mask.cols, CV_8UC3, cv::Scalar(255, 255, 255));
+    preview.setTo(cv::Scalar(17, 24, 39), mask);
+    return preview;
+}
+
+cv::Mat grayPreview(const cv::Mat& input) {
+    const cv::Mat gray = toGray(input);
+    if (gray.empty()) return {};
+    cv::Mat bgr;
+    cv::cvtColor(gray, bgr, cv::COLOR_GRAY2BGR);
+    return bgr;
+}
+
+cv::Mat weaponOutlinePreview(const cv::Mat& input) {
     const cv::Mat bgr = toBgr(input);
     if (bgr.empty()) return {};
-    cv::Mat edges = TemplateMatcher::preprocessWeapon(bgr);
-    cv::Mat preview(edges.rows, edges.cols, CV_8UC3, cv::Scalar(255, 255, 255));
-    preview.setTo(cv::Scalar(17, 24, 39), edges);
-    return preview;
+    const cv::Mat edges = TemplateMatcher::preprocessWeapon(bgr);
+    return binaryPreview(edges);
+}
+
+cv::Mat whiteTextPreview(const cv::Mat& input) {
+    const cv::Mat bgr = toBgr(input);
+    if (bgr.empty()) return {};
+    cv::Mat binary;
+    cv::inRange(bgr, cv::Scalar(220, 220, 220), cv::Scalar(255, 255, 255), binary);
+    return binaryPreview(binary);
+}
+
+cv::Mat previewForRegion(const cv::Mat& input, const std::string& key) {
+    if (key == "weapon_region") return weaponOutlinePreview(input);
+    if (key == "weapon1_name_region" || key == "weapon2_name_region") return whiteTextPreview(input);
+    if (key == "stance_region") return weaponOutlinePreview(input);
+    return grayPreview(input);
 }
 
 QPixmap matToPixmap(const cv::Mat& bgr) {
@@ -122,13 +167,13 @@ QPixmap matToPixmap(const cv::Mat& bgr) {
     return QPixmap::fromImage(image.copy());
 }
 
-QPixmap outlinePixmapFromFile(const std::filesystem::path& path) {
+QPixmap previewPixmapFromFile(const std::filesystem::path& path, const std::string& key) {
     if (path.empty()) return {};
     std::error_code ec;
     if (!std::filesystem::exists(path, ec) || ec) return {};
     const cv::Mat image = cv::imread(path.string(), cv::IMREAD_UNCHANGED);
     if (image.empty()) return {};
-    return matToPixmap(outlinePreview(image));
+    return matToPixmap(previewForRegion(image, key));
 }
 
 int scaledValue(int base, int percent) {
@@ -173,7 +218,6 @@ void ScaleCalibrationWindow::closeEvent(QCloseEvent* event) {
     closing_ = true;
     if (refresh_timer_) {
         refresh_timer_->stop();
-        // 彻底断开，避免析构边缘仍有排队的 timeout 触发 updatePreview。
         disconnect(refresh_timer_, nullptr, this, nullptr);
     }
     QWidget::closeEvent(event);
@@ -195,11 +239,11 @@ void ScaleCalibrationWindow::buildUi() {
     region_combo_->addItem(QStringLiteral("武器1名称区域"), QStringLiteral("weapon1_name_region"));
     region_combo_->addItem(QStringLiteral("武器2名称区域"), QStringLiteral("weapon2_name_region"));
     region_combo_->addItem(QStringLiteral("姿势识别区域"), QStringLiteral("stance_region"));
-    template_button_ = new QPushButton(QStringLiteral("选择模板"), this);
+    template_combo_ = new QComboBox(this);
     auto* save = new QPushButton(QStringLiteral("保存配置"), this);
     auto* autoBtn = new QPushButton(QStringLiteral("自动校准"), this);
     top->addWidget(region_combo_, 2);
-    top->addWidget(template_button_, 3);
+    top->addWidget(template_combo_, 3);
     top->addWidget(save);
     top->addWidget(autoBtn);
     root->addLayout(top);
@@ -238,7 +282,7 @@ void ScaleCalibrationWindow::buildUi() {
     preview_row->setSpacing(12);
     auto* template_col = new QVBoxLayout();
     template_col->setSpacing(6);
-    auto* template_title = new QLabel(QStringLiteral("模板轮廓"), this);
+    auto* template_title = new QLabel(QStringLiteral("模板处理图"), this);
     template_title->setStyleSheet("font-size:13px;font-weight:700;color:#111827;");
     template_preview_ = makePreviewLabel(this);
     template_col->addWidget(template_title);
@@ -246,7 +290,7 @@ void ScaleCalibrationWindow::buildUi() {
 
     auto* capture_col = new QVBoxLayout();
     capture_col->setSpacing(6);
-    auto* capture_title = new QLabel(QStringLiteral("截图轮廓"), this);
+    auto* capture_title = new QLabel(QStringLiteral("截图处理图"), this);
     capture_title->setStyleSheet("font-size:13px;font-weight:700;color:#111827;");
     capture_preview_ = makePreviewLabel(this);
     capture_col->addWidget(capture_title);
@@ -261,7 +305,16 @@ void ScaleCalibrationWindow::buildUi() {
     root->addWidget(result_label_);
 
     connect(region_combo_, &QComboBox::currentIndexChanged, this, [this] { loadRegion(); });
-    connect(template_button_, &QPushButton::clicked, this, &ScaleCalibrationWindow::chooseTemplate);
+    connect(template_combo_, &QComboBox::currentIndexChanged, this, [this](int index) {
+        if (index < 0 || index >= static_cast<int>(template_paths_.size())) {
+            current_template_path_.clear();
+            template_outline_ = {};
+        } else {
+            current_template_path_ = template_paths_[static_cast<size_t>(index)];
+            loadTemplatePreview();
+        }
+        updatePreview();
+    });
     connect(width_slider_, &QSlider::valueChanged, this, &ScaleCalibrationWindow::updateSizeFromSliders);
     connect(height_slider_, &QSlider::valueChanged, this, &ScaleCalibrationWindow::updateSizeFromSliders);
     connect(width_edit_, &QLineEdit::editingFinished, this, [this] {
@@ -343,39 +396,28 @@ void ScaleCalibrationWindow::runAutoSearch() {
 
 void ScaleCalibrationWindow::reloadTemplates() {
     const auto root = templateRootForKey(config_.paths().templatesDir(), currentRegionKey());
-    const auto files = templateFiles(root);
-    if (files.empty()) {
+    template_paths_ = templateFiles(root);
+    {
+        QSignalBlocker blocker(template_combo_);
+        template_combo_->clear();
+        for (const auto& file : template_paths_) {
+            template_combo_->addItem(templateDisplayName(file, root));
+        }
+        if (template_paths_.empty()) {
+            template_combo_->addItem(QStringLiteral("未找到模板"));
+        }
+    }
+    if (template_paths_.empty()) {
         current_template_path_.clear();
         template_outline_ = {};
-        template_button_->setText(QStringLiteral("未找到模板"));
         return;
     }
-    current_template_path_ = files.front();
-    template_button_->setText(templateDisplayName(current_template_path_, root));
+    current_template_path_ = template_paths_.front();
+    {
+        QSignalBlocker blocker(template_combo_);
+        template_combo_->setCurrentIndex(0);
+    }
     loadTemplatePreview();
-}
-
-void ScaleCalibrationWindow::chooseTemplate() {
-    choosing_template_ = true;
-    if (refresh_timer_) refresh_timer_->stop();
-    const auto root = templateRootForKey(config_.paths().templatesDir(), currentRegionKey());
-    // QFileDialog 会启动嵌套事件循环；用 QPointer 探测对话框期间 this 是否被销毁，
-    // 避免对话框返回后访问已析构的窗口成员（Qt6Core use-after-free 崩溃根因）。
-    QPointer<ScaleCalibrationWindow> guard(this);
-    const QString selected = QFileDialog::getOpenFileName(
-        this,
-        QStringLiteral("选择模板"),
-        QString::fromStdWString(root.wstring()),
-        QStringLiteral("PNG 模板 (*.png)")
-    );
-    if (!guard || closing_) return;  // 窗口已在对话框期间关闭/销毁。
-    choosing_template_ = false;
-    if (refresh_timer_) refresh_timer_->start();
-    if (selected.isEmpty()) return;
-    current_template_path_ = std::filesystem::path(selected.toStdWString());
-    template_button_->setText(templateDisplayName(current_template_path_, root));
-    loadTemplatePreview();
-    updatePreview();
 }
 
 void ScaleCalibrationWindow::updateSizeFromSliders() {
@@ -389,7 +431,7 @@ void ScaleCalibrationWindow::updateSizeFromSliders() {
 }
 
 void ScaleCalibrationWindow::updatePreview() {
-    if (closing_ || updating_preview_ || choosing_template_) return;
+    if (closing_ || updating_preview_) return;
     BoolGuard guard(updating_preview_);
     const std::string key = currentRegionKey();
     const int width = std::clamp(width_edit_->text().toInt(), 1, 2000);
@@ -399,7 +441,7 @@ void ScaleCalibrationWindow::updatePreview() {
 }
 
 void ScaleCalibrationWindow::loadTemplatePreview() {
-    template_outline_ = outlinePixmapFromFile(current_template_path_);
+    template_outline_ = previewPixmapFromFile(current_template_path_, currentRegionKey());
 }
 
 QPixmap ScaleCalibrationWindow::scaledCapturePixmap(const std::string& key, int width, int height) const {
@@ -411,7 +453,7 @@ QPixmap ScaleCalibrationWindow::scaledCapturePixmap(const std::string& key, int 
         if (bgr.empty()) return {};
         cv::Mat resized;
         cv::resize(bgr, resized, cv::Size(width, height), 0.0, 0.0, cv::INTER_AREA);
-        return matToPixmap(outlinePreview(resized));
+        return matToPixmap(previewForRegion(resized, key));
     } catch (const std::exception&) {
         return {};
     } catch (...) {

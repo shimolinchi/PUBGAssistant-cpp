@@ -43,7 +43,7 @@ QString CurveEditor::displayLabel(const QString& label) const {
 
 QRectF CurveEditor::plotRect() const {
     // 顶部多留出图例行的高度，左侧给 y 轴刻度数字留足宽度。
-    return rect().adjusted(56, 44, -24, -40);
+    return rect().adjusted(56, 58, -24, -40);
 }
 
 void CurveEditor::ranges(double& min_x, double& max_x, double& min_y, double& max_y) const {
@@ -126,7 +126,7 @@ void CurveEditor::paintEvent(QPaintEvent*) {
     legend_font.setBold(true);
     p.setFont(legend_font);
     double legend_x = pr.left();
-    const double legend_y = (pr.top() - 44.0) / 2.0 + 8.0;
+    const double legend_y = pr.top() - 20.0;
     for (const auto& c : curves_) {
         if (c.label.isEmpty()) continue;
         const QString label = displayLabel(c.label);

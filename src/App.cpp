@@ -9,6 +9,32 @@
 #include <QApplication>
 #include <QMetaObject>
 
+#if defined(_WIN32) && defined(_DEBUG)
+#include <crtdbg.h>
+namespace {
+// 设 PUBG_HEAPCHECK=1 后，在关键节点校验整个调试堆，第一处报损坏即定位越界点附近。
+bool heapCheckEnabled() {
+    static const bool on = [] {
+        size_t len = 0;
+        char buf[8]{};
+        return getenv_s(&len, buf, sizeof(buf), "PUBG_HEAPCHECK") == 0 && len > 0 && buf[0] == '1';
+    }();
+    return on;
+}
+void heapProbe(const char* where) {
+    if (!heapCheckEnabled()) return;
+    if (_CrtCheckMemory()) {
+        std::cout << "[heapcheck] OK at " << where << "\n";
+    } else {
+        std::cout << "[heapcheck] *** CORRUPTED detected at " << where << " ***\n";
+    }
+}
+} // namespace
+#define PUBG_HEAP_PROBE(where) heapProbe(where)
+#else
+#define PUBG_HEAP_PROBE(where) ((void)0)
+#endif
+
 namespace pubg {
 
 App::App()
@@ -165,9 +191,10 @@ void App::registerHotkeys() {
 }
 
 void App::reloadHotkeys() {
-    std::lock_guard control_lock(control_mutex_);
+    // 先停热键线程再持 control_mutex_，理由同 shutdown()：避免 join 与回调争锁死锁。
     const bool was_running = hotkeys_.isRunning();
     hotkeys_.clear();
+    std::lock_guard control_lock(control_mutex_);
     registerHotkeys();
     recoil_->reloadConfig();
     if (was_running) {
@@ -176,7 +203,6 @@ void App::reloadHotkeys() {
 }
 
 void App::shutdown() {
-    std::lock_guard control_lock(control_mutex_);
     {
         std::lock_guard lock(state_mutex_);
         if (shutting_down_) {
@@ -184,7 +210,11 @@ void App::shutdown() {
         }
         shutting_down_ = true;
     }
+    PUBG_HEAP_PROBE("shutdown.enter");
+    // 先停热键线程（不持 control_mutex_）：热键回调（如 toggleDisplay）会锁 control_mutex_，
+    // 若在这里持锁再 join，会与正在执行的回调互相等待造成死锁。
     hotkeys_.stop();
+    std::lock_guard control_lock(control_mutex_);
     equipment_detector_->setEnabled(false);
     weapon_detector_->setEnabled(false);
     gesture_identifier_->setEnabled(false);
@@ -196,6 +226,26 @@ void App::shutdown() {
     c4_->setEnabled(false);
     special_->shutdown();
     c4_->shutdown();
+
+    // 确定性地销毁所有带后台线程的模块，趁 config_ 等成员都还存活。
+    // 否则这些 worker（recoil/large_map/throwables 等）只在各自析构里 join，
+    // 会一直跑到 ~App()——而 manual_assistants_ 等成员声明在这些 unique_ptr 之后、
+    // 会先被析构，造成“线程仍在跑时成员已销毁”的竞态（点红点退出时崩在 ~unordered_map）。
+    // 按构造逆序 reset，确保所有线程在此刻全部停止。
+    status_hud_.reset();
+    c4_.reset();
+    throwables_.reset();
+    large_map_.reset();
+    map_points_.reset();
+    special_.reset();
+    recoil_.reset();
+    gesture_identifier_.reset();
+    equipment_detector_.reset();
+    weapon_detector_.reset();
+    elevation_.reset();
+    minimap_.reset();
+    regions_.reset();
+    PUBG_HEAP_PROBE("shutdown.afterReset");
 }
 
 int App::hotkeyVk(const std::string& name, const std::string& fallback) const {
@@ -582,8 +632,10 @@ void App::printStatus() const {
 int App::run() {
     std::cout << "PUBGAssistant C++ port started.\n";
     std::cout << "F1 weapon detection, F2 display, F3 recoil, Tab equipment scan.\n";
+    PUBG_HEAP_PROBE("run.start");
     syncMarkerColorsFromConfig();
     setWeaponDetectionEnabled(true);
+    PUBG_HEAP_PROBE("run.afterEnableDetection");
     pubg::ui::MainWindow::ControlCallbacks callbacks;
     callbacks.set_weapon_detection = [this](bool enabled) { setWeaponDetectionEnabled(enabled); };
     callbacks.set_display = [this](bool enabled) { setDisplayEnabled(enabled); };
