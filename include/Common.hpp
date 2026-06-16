@@ -155,10 +155,11 @@ inline std::wstring widen(const std::string& text) {
     }
 #ifdef _WIN32
     const int size = MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, nullptr, 0);
-    std::wstring wide(static_cast<size_t>(size > 0 ? size - 1 : 0), L'\0');
-    if (size > 1) {
-        MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, wide.data(), size);
+    if (size <= 1) {
+        return {};
     }
+    std::wstring wide(static_cast<size_t>(size - 1), L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), wide.data(), size - 1);
     return wide;
 #else
     return std::wstring(text.begin(), text.end());

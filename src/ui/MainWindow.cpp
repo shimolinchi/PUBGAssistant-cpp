@@ -555,12 +555,13 @@ void MainWindow::drawDebugOverlay() {
 }
 
 void MainWindow::openScaleCalibrator() {
-    auto* window = new ScaleCalibrationWindow(config_, regions_);
-    window->setAttribute(Qt::WA_DeleteOnClose, true);
-    window->setWindowFlag(Qt::Window, true);
-    window->show();
-    window->raise();
-    window->activateWindow();
+    if (!scale_calibration_window_) {
+        scale_calibration_window_ = new ScaleCalibrationWindow(config_, regions_, this);
+        scale_calibration_window_->setWindowFlag(Qt::Window, true);
+    }
+    scale_calibration_window_->show();
+    scale_calibration_window_->raise();
+    scale_calibration_window_->activateWindow();
 }
 
 void MainWindow::openRecoilDebugger() {

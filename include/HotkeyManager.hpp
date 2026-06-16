@@ -88,7 +88,7 @@ private:
     // 处理单个键盘事件，返回 true 表示吞掉该键。
     bool onKeyboardEvent(int vk, bool down);
     // 在当前已知按键状态下判断组合是否成立。
-    bool comboDownFromState(const HotkeyCombo& combo) const;
+    bool comboDownFromState(const HotkeyCombo& combo, bool exact_modifiers = false) const;
     // 前台窗口是否属于“放行进程”或本程序自身（此时 F 键不吞）。按 hwnd 缓存结果。
     bool foregroundAllowsKeys();
 #endif
@@ -110,6 +110,7 @@ private:
 #ifdef _WIN32
     std::thread hook_worker_;
     HHOOK hook_ = nullptr;
+    std::atomic_bool hook_ready_{false};
     unsigned long hook_thread_id_ = 0;
     // 前台窗口判定缓存（仅钩子线程访问）。
     HWND fg_cache_hwnd_ = nullptr;

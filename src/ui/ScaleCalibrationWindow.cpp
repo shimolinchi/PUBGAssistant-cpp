@@ -2,16 +2,20 @@
 
 #include <QCloseEvent>
 #include <QFormLayout>
+#include <QHideEvent>
 #include <QHBoxLayout>
 #include <QImage>
 #include <QPushButton>
 #include <QSignalBlocker>
+#include <QShowEvent>
 #include <QVBoxLayout>
 
 #include <algorithm>
 #include <cmath>
 #include <exception>
 #include <filesystem>
+#include <limits>
+#include <optional>
 #include <vector>
 
 #include "ScreenCapture.hpp"
@@ -63,6 +67,7 @@ QString templateDisplayName(const std::filesystem::path& file, const std::filesy
     if (!ec && !relative.empty()) {
         const auto parent = relative.parent_path();
         if (!parent.empty() && parent != ".") {
+            if (file.stem() == "0") return QString::fromStdWString(parent.wstring());
             return QString::fromStdWString(parent.wstring()) + QStringLiteral(" / ") +
                    QString::fromStdWString(file.stem().wstring());
         }
@@ -152,6 +157,13 @@ cv::Mat whiteTextPreview(const cv::Mat& input) {
     return binaryPreview(binary);
 }
 
+cv::Mat matchMatForRegion(const cv::Mat& input, const std::string& key) {
+    if (key == "weapon_region") return TemplateMatcher::preprocessWeapon(toBgr(input));
+    if (key == "weapon1_name_region" || key == "weapon2_name_region") return toGray(input);
+    if (key == "stance_region") return toGray(input);
+    return toGray(input);
+}
+
 cv::Mat previewForRegion(const cv::Mat& input, const std::string& key) {
     if (key == "weapon_region") return weaponOutlinePreview(input);
     if (key == "weapon1_name_region" || key == "weapon2_name_region") return whiteTextPreview(input);
@@ -159,10 +171,36 @@ cv::Mat previewForRegion(const cv::Mat& input, const std::string& key) {
     return grayPreview(input);
 }
 
+std::optional<double> matchScoreForRegion(const cv::Mat& roi, const cv::Mat& tpl, const std::string& key) {
+    if (roi.empty() || tpl.empty() || tpl.rows > roi.rows || tpl.cols > roi.cols) return std::nullopt;
+    cv::Mat roi_match = matchMatForRegion(roi, key);
+    cv::Mat tpl_match = matchMatForRegion(tpl, key);
+    if (roi_match.empty() || tpl_match.empty() || tpl_match.rows > roi_match.rows || tpl_match.cols > roi_match.cols) {
+        return std::nullopt;
+    }
+
+    cv::Mat result;
+    if (key == "weapon_region") {
+        cv::Mat mask;
+        cv::dilate(tpl_match, mask, cv::Mat::ones(5, 5, CV_8U), {-1, -1}, 1);
+        if (cv::countNonZero(mask) == 0 || cv::countNonZero(roi_match) < 5) return std::nullopt;
+        cv::matchTemplate(roi_match, tpl_match, result, cv::TM_CCORR_NORMED, mask);
+    } else {
+        cv::matchTemplate(roi_match, tpl_match, result, cv::TM_CCOEFF_NORMED);
+    }
+
+    double max_val = 0.0;
+    cv::minMaxLoc(result, nullptr, &max_val);
+    if (!std::isfinite(max_val)) return std::nullopt;
+    return max_val;
+}
+
 QPixmap matToPixmap(const cv::Mat& bgr) {
     if (bgr.empty()) return {};
+    cv::Mat contiguous = bgr.isContinuous() ? bgr : bgr.clone();
     cv::Mat rgb;
-    cv::cvtColor(bgr, rgb, cv::COLOR_BGR2RGB);
+    cv::cvtColor(contiguous, rgb, cv::COLOR_BGR2RGB);
+    rgb = rgb.clone();
     QImage image(rgb.data, rgb.cols, rgb.rows, static_cast<int>(rgb.step), QImage::Format_RGB888);
     return QPixmap::fromImage(image.copy());
 }
@@ -211,16 +249,30 @@ ScaleCalibrationWindow::ScaleCalibrationWindow(Config& config, RegionManager& re
     refresh_timer_ = new QTimer(this);
     refresh_timer_->setInterval(220);
     connect(refresh_timer_, &QTimer::timeout, this, &ScaleCalibrationWindow::updatePreview);
-    refresh_timer_->start();
+    startRefresh();
 }
 
 void ScaleCalibrationWindow::closeEvent(QCloseEvent* event) {
     closing_ = true;
-    if (refresh_timer_) {
-        refresh_timer_->stop();
-        disconnect(refresh_timer_, nullptr, this, nullptr);
-    }
-    QWidget::closeEvent(event);
+    stopRefresh();
+    if (template_preview_) template_preview_->clear();
+    if (capture_preview_) capture_preview_->clear();
+    template_outline_ = {};
+    event->ignore();
+    hide();
+}
+
+void ScaleCalibrationWindow::hideEvent(QHideEvent* event) {
+    closing_ = true;
+    stopRefresh();
+    QWidget::hideEvent(event);
+}
+
+void ScaleCalibrationWindow::showEvent(QShowEvent* event) {
+    closing_ = false;
+    QWidget::showEvent(event);
+    startRefresh();
+    updatePreview();
 }
 
 void ScaleCalibrationWindow::buildUi() {
@@ -391,7 +443,100 @@ void ScaleCalibrationWindow::saveConfig() {
 }
 
 void ScaleCalibrationWindow::runAutoSearch() {
-    result_label_->setText(QStringLiteral("自动校准入口已保留；当前窗口使用实时截图和手动缩放微调。"));
+    if (current_template_path_.empty()) {
+        result_label_->setText(QStringLiteral("没有可用于自动校准的模板。"));
+        return;
+    }
+
+    const std::string key = currentRegionKey();
+    const auto rect = regions_.getRealRegion(key);
+    if (!rect || !rect->valid()) {
+        result_label_->setText(QStringLiteral("无法读取当前区域，请先校准截图区域。"));
+        return;
+    }
+
+    cv::Mat source;
+    cv::Mat tpl;
+    try {
+        ScreenCapture capture;
+        source = capture.grabBgr(*rect);
+        tpl = cv::imread(current_template_path_.string(), cv::IMREAD_UNCHANGED);
+    } catch (...) {
+        result_label_->setText(QStringLiteral("截图失败，无法自动校准。"));
+        return;
+    }
+    if (source.empty() || tpl.empty()) {
+        result_label_->setText(QStringLiteral("截图或模板为空，无法自动校准。"));
+        return;
+    }
+
+    auto scoreAt = [&](int w, int h) -> std::optional<double> {
+        cv::Mat resized;
+        cv::resize(source, resized, cv::Size(w, h), 0.0, 0.0, cv::INTER_AREA);
+        return matchScoreForRegion(resized, tpl, key);
+    };
+
+    int best_w = std::clamp(width_edit_->text().toInt(), 1, 2000);
+    int best_h = std::clamp(height_edit_->text().toInt(), 1, 2000);
+    double best_score = -std::numeric_limits<double>::infinity();
+
+    auto consider = [&](int w, int h) {
+        if (w <= 0 || h <= 0 || w > 2000 || h > 2000) return;
+        const auto score = scoreAt(w, h);
+        if (score && *score > best_score) {
+            best_score = *score;
+            best_w = w;
+            best_h = h;
+        }
+    };
+
+    const int start_w = std::max(1, width_edit_->text().toInt());
+    const int start_h = std::max(1, height_edit_->text().toInt());
+    const int min_w = std::max(1, scaledValue(base_width_, kScaleMin));
+    const int max_w = std::min(2000, scaledValue(base_width_, kScaleMax));
+    const int min_h = std::max(1, scaledValue(base_height_, kScaleMin));
+    const int max_h = std::min(2000, scaledValue(base_height_, kScaleMax));
+
+    const int coarse_w_step = std::max(1, base_width_ / 20);
+    const int coarse_h_step = std::max(1, base_height_ / 20);
+    for (int w = min_w; w <= max_w; w += coarse_w_step) {
+        for (int h = min_h; h <= max_h; h += coarse_h_step) {
+            consider(w, h);
+        }
+    }
+    consider(start_w, start_h);
+    consider(max_w, max_h);
+
+    const int fine_w_min = std::max(min_w, best_w - coarse_w_step * 2);
+    const int fine_w_max = std::min(max_w, best_w + coarse_w_step * 2);
+    const int fine_h_min = std::max(min_h, best_h - coarse_h_step * 2);
+    const int fine_h_max = std::min(max_h, best_h + coarse_h_step * 2);
+    for (int w = fine_w_min; w <= fine_w_max; ++w) {
+        for (int h = fine_h_min; h <= fine_h_max; ++h) {
+            consider(w, h);
+        }
+    }
+
+    if (!std::isfinite(best_score)) {
+        result_label_->setText(QStringLiteral("自动校准没有得到有效匹配分数。"));
+        return;
+    }
+
+    {
+        QSignalBlocker bw(width_slider_);
+        QSignalBlocker bh(height_slider_);
+        width_slider_->setValue(std::clamp(static_cast<int>(std::lround(best_w * 100.0 / std::max(1, base_width_))), kScaleMin, kScaleMax));
+        height_slider_->setValue(std::clamp(static_cast<int>(std::lround(best_h * 100.0 / std::max(1, base_height_))), kScaleMin, kScaleMax));
+    }
+    width_edit_->setText(QString::number(best_w));
+    height_edit_->setText(QString::number(best_h));
+    width_scale_label_->setText(QString::number(width_slider_->value()) + "%");
+    height_scale_label_->setText(QString::number(height_slider_->value()) + "%");
+    updatePreview();
+    result_label_->setText(QStringLiteral("自动校准完成：%1 x %2，匹配分数 %3")
+        .arg(best_w)
+        .arg(best_h)
+        .arg(best_score, 0, 'f', 3));
 }
 
 void ScaleCalibrationWindow::reloadTemplates() {
@@ -438,10 +583,31 @@ void ScaleCalibrationWindow::updatePreview() {
     const int height = std::clamp(height_edit_->text().toInt(), 1, 2000);
     setPreviewPixmap(template_preview_, template_outline_, QStringLiteral("请选择模板"));
     setPreviewPixmap(capture_preview_, scaledCapturePixmap(key, width, height), QStringLiteral("无法截取当前区域"));
+    const auto score = scaledMatchScore(key, width, height);
+    if (score) {
+        result_label_->setText(QStringLiteral("当前尺寸：%1 x %2，当前模板匹配分数：%3")
+            .arg(width)
+            .arg(height)
+            .arg(*score, 0, 'f', 3));
+    } else {
+        result_label_->setText(QStringLiteral("当前尺寸：%1 x %2，暂无有效匹配分数").arg(width).arg(height));
+    }
 }
 
 void ScaleCalibrationWindow::loadTemplatePreview() {
     template_outline_ = previewPixmapFromFile(current_template_path_, currentRegionKey());
+}
+
+void ScaleCalibrationWindow::stopRefresh() {
+    if (refresh_timer_) {
+        refresh_timer_->stop();
+    }
+}
+
+void ScaleCalibrationWindow::startRefresh() {
+    if (refresh_timer_ && !refresh_timer_->isActive()) {
+        refresh_timer_->start();
+    }
 }
 
 QPixmap ScaleCalibrationWindow::scaledCapturePixmap(const std::string& key, int width, int height) const {
@@ -458,6 +624,26 @@ QPixmap ScaleCalibrationWindow::scaledCapturePixmap(const std::string& key, int 
         return {};
     } catch (...) {
         return {};
+    }
+}
+
+std::optional<double> ScaleCalibrationWindow::scaledMatchScore(const std::string& key, int width, int height) const {
+    if (current_template_path_.empty()) return std::nullopt;
+    try {
+        const auto rect = regions_.getRealRegion(key);
+        if (!rect || !rect->valid()) return std::nullopt;
+        ScreenCapture capture;
+        cv::Mat bgr = capture.grabBgr(*rect);
+        if (bgr.empty()) return std::nullopt;
+        cv::Mat resized;
+        cv::resize(bgr, resized, cv::Size(width, height), 0.0, 0.0, cv::INTER_AREA);
+        const cv::Mat tpl = cv::imread(current_template_path_.string(), cv::IMREAD_UNCHANGED);
+        if (tpl.empty()) return std::nullopt;
+        return matchScoreForRegion(resized, tpl, key);
+    } catch (const std::exception&) {
+        return std::nullopt;
+    } catch (...) {
+        return std::nullopt;
     }
 }
 

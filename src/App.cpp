@@ -24,10 +24,11 @@ bool heapCheckEnabled() {
 void heapProbe(const char* where) {
     if (!heapCheckEnabled()) return;
     if (_CrtCheckMemory()) {
-        std::cout << "[heapcheck] OK at " << where << "\n";
+        std::cerr << "[heapcheck] OK at " << where << "\n";
     } else {
-        std::cout << "[heapcheck] *** CORRUPTED detected at " << where << " ***\n";
+        std::cerr << "[heapcheck] *** CORRUPTED detected at " << where << " ***\n";
     }
+    std::cerr.flush();
 }
 } // namespace
 #define PUBG_HEAP_PROBE(where) heapProbe(where)
@@ -40,26 +41,43 @@ namespace pubg {
 App::App()
     : paths_(),
       config_(paths_) {
+    PUBG_HEAP_PROBE("ctor.start");
     config_.load();
+    PUBG_HEAP_PROBE("ctor.afterConfigLoad");
     migrateLegacyDefaultHotkeys();
+    PUBG_HEAP_PROBE("ctor.afterHotkeyMigrate");
     regions_ = std::make_unique<RegionManager>(config_);
+    PUBG_HEAP_PROBE("ctor.afterRegions");
     minimap_ = std::make_unique<MinimapRadar>(config_, *regions_, 60);
+    PUBG_HEAP_PROBE("ctor.afterMinimap");
     elevation_ = std::make_unique<ElevationRadar>(config_, *regions_, 30);
+    PUBG_HEAP_PROBE("ctor.afterElevation");
     weapon_detector_ = std::make_unique<WeaponDetector>(config_, *regions_, 30, 0.65);
+    PUBG_HEAP_PROBE("ctor.afterWeaponDetector");
     equipment_detector_ = std::make_unique<EquipmentDetector>(config_, *regions_, 15, 10.0);
+    PUBG_HEAP_PROBE("ctor.afterEquipmentDetector");
     gesture_identifier_ = std::make_unique<GestureIdentifier>(config_, *regions_, 30, 0.65);
+    PUBG_HEAP_PROBE("ctor.afterGestureIdentifier");
     recoil_ = std::make_unique<RecoilControl>(config_, regions_.get());
+    PUBG_HEAP_PROBE("ctor.afterRecoil");
     special_ = std::make_unique<SpecialAssistants>(config_, *regions_, *minimap_, *elevation_);
+    PUBG_HEAP_PROBE("ctor.afterSpecial");
     map_points_ = std::make_unique<MapPointAssistant>(config_, *regions_);
+    PUBG_HEAP_PROBE("ctor.afterMapPoints");
     large_map_ = std::make_unique<LargeMapRadar>(config_, *regions_);
+    PUBG_HEAP_PROBE("ctor.afterLargeMap");
     throwables_ = std::make_unique<ThrowablesAssistant>(config_, *regions_, *minimap_);
+    PUBG_HEAP_PROBE("ctor.afterThrowables");
     c4_ = std::make_unique<C4Assistant>(config_, *regions_, *minimap_);
+    PUBG_HEAP_PROBE("ctor.afterC4");
     status_hud_ = std::make_unique<StatusHud>(config_, *regions_);
+    PUBG_HEAP_PROBE("ctor.afterStatusHud");
     manual_assistants_ = {
         {"mortar", false}, {"rocket", false}, {"throwables", false},
         {"vss", false}, {"crossbow", false}, {"c4", false},
     };
     wireCallbacks();
+    PUBG_HEAP_PROBE("ctor.afterWireCallbacks");
 }
 
 void App::wireCallbacks() {
@@ -147,15 +165,20 @@ void App::registerHotkeys() {
     });
     hotkeys_.addStateWatcher("left_mouse", VK_LBUTTON, [this](bool pressed) {
         bool show_map_points = false;
+        bool weapon_detection = false;
         {
             std::lock_guard lock(state_mutex_);
             left_pressed_ = pressed;
             show_map_points = left_pressed_ && middle_pressed_ && current_weapon_.empty();
+            weapon_detection = weapon_detection_enabled_;
         }
         if (pressed) {
             const auto [x, y] = InputController::cursorPosition();
             large_map_->onMouseClick(x, y, true);
             c4_->onMouseLeftPress();
+        } else if (weapon_detection) {
+            // 鼠标左键松开（多为拖完配件）后触发一次装备栏识别更新。
+            equipment_detector_->requestScan();
         }
         if (show_map_points) {
             map_points_->setEnabled(true);
@@ -174,12 +197,17 @@ void App::registerHotkeys() {
     });
     hotkeys_.addStateWatcher("right_mouse", VK_RBUTTON, [this](bool pressed) {
         bool hide_map_points = false;
+        bool weapon_detection = false;
         {
             std::lock_guard lock(state_mutex_);
             right_pressed_ = pressed;
             hide_map_points = pressed && !alt_pressed_;
+            weapon_detection = weapon_detection_enabled_;
         }
         c4_->onMouseRightClick(pressed);
+        if (!pressed && weapon_detection) {
+            equipment_detector_->requestScan();
+        }
         if (hide_map_points && map_points_) {
             map_points_->setEnabled(false);
         }

@@ -9,6 +9,7 @@
 #include <QWidget>
 
 #include <filesystem>
+#include <optional>
 #include <vector>
 
 #include "Config.hpp"
@@ -25,6 +26,8 @@ public:
 
 protected:
     void closeEvent(QCloseEvent* event) override;
+    void hideEvent(QHideEvent* event) override;
+    void showEvent(QShowEvent* event) override;
 
 private:
     void buildUi();
@@ -36,8 +39,11 @@ private:
     void reloadTemplates();
     void updateSizeFromSliders();
     void loadTemplatePreview();
+    void stopRefresh();
+    void startRefresh();
     [[nodiscard]] std::string currentRegionKey() const;
     [[nodiscard]] QPixmap scaledCapturePixmap(const std::string& key, int width, int height) const;
+    [[nodiscard]] std::optional<double> scaledMatchScore(const std::string& key, int width, int height) const;
 
     Config& config_;
     RegionManager& regions_;

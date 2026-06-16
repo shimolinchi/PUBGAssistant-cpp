@@ -21,8 +21,9 @@ EquipmentDetector::EquipmentDetector(Config& config, RegionManager& regions, int
             }
             cv::Mat img = cv::imread(file.path().string(), cv::IMREAD_GRAYSCALE);
             if (!img.empty()) {
-                cv::resize(img, img, {28, 28});
-                number_templates_[i] = img;
+                cv::Mat resized;
+                cv::resize(img, resized, {28, 28});
+                number_templates_[i] = resized;
                 break;
             }
         }
@@ -35,6 +36,15 @@ EquipmentDetector::~EquipmentDetector() {
     setEnabled(false);
 }
 
+double EquipmentDetector::thresholdFor(const std::string& key) {
+    if (key == "names") return 0.55;
+    if (key == "scopes") return 0.65;
+    if (key == "grips") return 0.4;
+    if (key == "muzzles") return 0.4;
+    if (key == "stocks") return 0.4;
+    return 0.0;
+}
+
 void EquipmentDetector::setEnabled(bool enabled, Callback cb) {
     if (cb) {
         std::lock_guard lock(mutex_);
@@ -43,13 +53,27 @@ void EquipmentDetector::setEnabled(bool enabled, Callback cb) {
     if (enabled && !enabled_) {
         stop_ = false;
         enabled_ = true;
+        active_ = false;
+        scan_requested_ = false;
+        {
+            std::lock_guard lock(mutex_);
+            confirming_until_time_ = 0.0;
+            consecutive_no_numbers_ = 0;
+        }
         emitStatus("closed");
         worker_ = std::thread(&EquipmentDetector::run, this);
     } else if (!enabled && enabled_) {
         stop_ = true;
         enabled_ = false;
+        active_ = false;
+        scan_requested_ = false;
         if (worker_.joinable()) {
             worker_.join();
+        }
+        {
+            std::lock_guard lock(mutex_);
+            confirming_until_time_ = 0.0;
+            consecutive_no_numbers_ = 0;
         }
         emitStatus("closed");
     }
@@ -111,7 +135,9 @@ bool EquipmentDetector::detectWeaponNumber(ScreenCapture& capture, int slot) {
     if (bgr.empty()) {
         return false;
     }
-    cv::resize(bgr, bgr, {32, 32});
+    cv::Mat resized;
+    cv::resize(bgr, resized, {32, 32});
+    bgr = resized;
     cv::Mat gray;
     cv::cvtColor(bgr, gray, cv::COLOR_BGR2GRAY);
     for (const auto& [_, tpl] : number_templates_) {
@@ -141,12 +167,14 @@ WeaponSlotInfo EquipmentDetector::detectWeapon(ScreenCapture& capture, int slot)
         cv::Mat bgr = capture.grabBgr(*rect);
         if (!bgr.empty()) {
             auto [w, h] = nameTargetSize(name_region);
-            cv::resize(bgr, bgr, {w, h});
+            cv::Mat resized;
+            cv::resize(bgr, resized, {w, h});
+            bgr = resized;
             cv::Mat gray;
             cv::cvtColor(bgr, gray, cv::COLOR_BGR2GRAY);
             auto [name, score] = TemplateMatcher::matchGray(gray, name_templates_);
             info.name_score = score;
-            if (score >= thresholds_["names"]) {
+            if (score >= thresholdFor("names")) {
                 info.name = name;
             }
         }
@@ -166,102 +194,148 @@ WeaponSlotInfo EquipmentDetector::detectWeapon(ScreenCapture& capture, int slot)
         if (bgr.empty()) {
             return std::pair<std::string, double>{"", 0.0};
         }
-        cv::resize(bgr, bgr, {50, 50});
+        cv::Mat resized;
+        cv::resize(bgr, resized, {50, 50});
+        bgr = resized;
         return TemplateMatcher::matchMasked(bgr, templates);
     };
 
     auto [scope, scope_score] = detectPart("scope", scope_templates_);
-    if (scope_score >= thresholds_["scopes"]) info.scope = scope;
+    if (scope_score >= thresholdFor("scopes")) info.scope = scope;
     info.scope_score = scope_score;
 
     auto [grip, grip_score] = detectPart("grip", grip_templates_);
-    if (grip_score >= thresholds_["grips"]) info.grip = grip;
+    if (grip_score >= thresholdFor("grips")) info.grip = grip;
     info.grip_score = grip_score;
 
     auto [muzzle, muzzle_score] = detectPart("muzzle", muzzle_templates_);
-    if (muzzle_score >= thresholds_["muzzles"]) info.muzzle = muzzle;
+    if (muzzle_score >= thresholdFor("muzzles")) info.muzzle = muzzle;
     info.muzzle_score = muzzle_score;
 
     auto [stock, stock_score] = detectPart("stock", stock_templates_);
-    if (stock_score >= thresholds_["stocks"]) info.stock = stock;
+    if (stock_score >= thresholdFor("stocks")) info.stock = stock;
     info.stock_score = stock_score;
 
     return info;
 }
 
 void EquipmentDetector::onTabPress() {
-    ScreenCapture capture;
-    if (!detectAnyNumber(capture)) {
-        {
-            std::lock_guard lock(mutex_);
-            confirming_until_time_ = nowSeconds() + 0.35;
-        }
-        emitStatus("confirming");
+    if (!enabled_) {
         return;
     }
+
+    const bool was_active = active_.load();
+    if (was_active) {
+        active_ = false;
+        scan_requested_ = false;
+        {
+            std::lock_guard lock(mutex_);
+            confirming_until_time_ = 0.0;
+            consecutive_no_numbers_ = 0;
+        }
+        emitStatus("closed");
+        return;
+    }
+
+    active_ = true;
+    scan_requested_ = true;
     {
         std::lock_guard lock(mutex_);
-        confirming_until_time_ = 0.0;
+        confirming_until_time_ = nowSeconds() + 0.8;
+        consecutive_no_numbers_ = 0;
     }
-    emitStatus("opened");
-    std::map<int, WeaponSlotInfo> next;
-    next[1] = detectWeapon(capture, 1);
-    next[2] = detectWeapon(capture, 2);
-    {
-        std::lock_guard lock(mutex_);
-        current_ = next;
-        last_detected_time_ = nowSeconds();
-    }
-    if (auto cb = callbackCopy()) {
-        cb(next);
+    emitStatus("confirming");
+}
+
+void EquipmentDetector::requestScan() {
+    // 鼠标左键松开等外部事件触发：只在装备栏激活期间强制扫一次。
+    if (enabled_ && active_) {
+        scan_requested_.store(true);
     }
 }
 
 void EquipmentDetector::run() {
     ScreenCapture capture;
+    bool was_open = false;
     while (!stop_) {
         const double start = nowSeconds();
-        if (detectAnyNumber(capture)) {
-            {
-                std::lock_guard lock(mutex_);
-                confirming_until_time_ = 0.0;
-            }
-            emitStatus("opened");
-            std::map<int, WeaponSlotInfo> next;
-            next[1] = detectWeapon(capture, 1);
-            next[2] = detectWeapon(capture, 2);
-            {
-                std::lock_guard lock(mutex_);
-                current_ = next;
-                last_detected_time_ = nowSeconds();
-            }
-            if (auto cb = callbackCopy()) {
-                cb(next);
-            }
-        } else {
-            double last_seen = 0.0;
+        if (!active_) {
+            was_open = false;
+            scan_requested_.store(false);
+            std::this_thread::sleep_for(std::chrono::milliseconds(sleepMsForFps(fps_, nowSeconds() - start)));
+            continue;
+        }
+
+        const bool n1 = detectWeaponNumber(capture, 1);
+        const bool n2 = detectWeaponNumber(capture, 2);
+        const bool equipment_open = n1 || n2;
+        const bool forced = scan_requested_.exchange(false);
+
+        if (equipment_open) {
             double confirming_until = 0.0;
             {
                 std::lock_guard lock(mutex_);
-                last_seen = last_detected_time_;
                 confirming_until = confirming_until_time_;
+                confirming_until_time_ = 0.0;
+                last_detected_time_ = nowSeconds();
+                consecutive_no_numbers_ = 0;
+            }
+            emitStatus("opened");
+            if (!was_open || forced || confirming_until > start) {
+                scanCurrentEquipment(capture);
+            }
+        } else {
+            double confirming_until = 0.0;
+            int missing_count = 0;
+            {
+                std::lock_guard lock(mutex_);
+                confirming_until = confirming_until_time_;
+                if (confirming_until <= nowSeconds()) {
+                    missing_count = ++consecutive_no_numbers_;
+                }
             }
             const double now = nowSeconds();
             if (confirming_until > now) {
+                scan_requested_ = true;
                 emitStatus("confirming");
-            } else if (last_seen > 0.0 && now - last_seen > idle_timeout_) {
+            } else if (missing_count >= 4) {
+                active_ = false;
+                scan_requested_ = false;
                 {
                     std::lock_guard lock(mutex_);
-                    current_[1] = {};
-                    current_[2] = {};
                     confirming_until_time_ = 0.0;
+                    consecutive_no_numbers_ = 0;
                 }
                 emitStatus("closed");
             } else {
-                emitStatus("closed");
+                emitStatus("confirming");
             }
         }
+        was_open = equipment_open;
         std::this_thread::sleep_for(std::chrono::milliseconds(sleepMsForFps(fps_, nowSeconds() - start)));
+    }
+}
+
+void EquipmentDetector::scanCurrentEquipment(ScreenCapture& capture) {
+    WeaponSlotInfo slot1 = detectWeapon(capture, 1);
+    WeaponSlotInfo slot2 = detectWeapon(capture, 2);
+    // 只用识别到武器名的槽位覆盖旧结果；空结果（多为装备栏开合过渡帧）保留上次的好数据，
+    // 避免“再次按 Tab 关闭时武器/配件凭空消失”。
+    bool changed = false;
+    std::map<int, WeaponSlotInfo> snapshot;
+    {
+        std::lock_guard lock(mutex_);
+        if (!slot1.name.empty()) { current_[1] = slot1; changed = true; }
+        if (!slot2.name.empty()) { current_[2] = slot2; changed = true; }
+        if (changed) {
+            last_detected_time_ = nowSeconds();
+            snapshot = current_;
+        }
+    }
+    if (changed) {
+        if (auto cb = callbackCopy()) {
+            cb(snapshot);
+        }
     }
 }
 

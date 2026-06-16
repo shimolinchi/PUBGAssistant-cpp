@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cwctype>
+#include <iostream>
 
 namespace pubg {
 
@@ -125,9 +126,29 @@ void HotkeyManager::pollLoop() {
             for (auto& hk : hotkeys_) {
                 if (!hk.combo.key) continue;
 #ifdef _WIN32
-                if (!hk.mouse) continue;  // 键盘键交给钩子。
+                if (!hk.mouse && hook_ready_) {
+                    continue;
+                }
 #endif
-                const bool down = InputController::isKeyDown(hk.combo.key);
+                bool down = InputController::isKeyDown(hk.combo.key);
+                for (const int modifier : hk.combo.modifiers) {
+                    if (!InputController::isKeyDown(modifier)) {
+                        down = false;
+                        break;
+                    }
+                }
+#ifdef _WIN32
+                if (down && !hk.mouse && !hk.state_mode) {
+                    const int modifiers[] = {VK_CONTROL, VK_SHIFT, VK_MENU};
+                    for (const int modifier : modifiers) {
+                        const bool required = std::find(hk.combo.modifiers.begin(), hk.combo.modifiers.end(), modifier) != hk.combo.modifiers.end();
+                        if (!required && InputController::isKeyDown(modifier)) {
+                            down = false;
+                            break;
+                        }
+                    }
+                }
+#endif
                 if (hk.state_mode && down != hk.was_down && hk.state_callback) {
                     state_callbacks.emplace_back(hk.state_callback, down);
                 } else if (!hk.state_mode && down && !hk.was_down && hk.callback) {
@@ -157,11 +178,20 @@ void HotkeyManager::pollLoop() {
 
 #ifdef _WIN32
 
-bool HotkeyManager::comboDownFromState(const HotkeyCombo& combo) const {
+bool HotkeyManager::comboDownFromState(const HotkeyCombo& combo, bool exact_modifiers) const {
     if (!combo.key) return false;
     for (const int modifier : combo.modifiers) {
         if (modifier && modifier < 256 && !key_down_[modifier]) {
             return false;
+        }
+    }
+    if (exact_modifiers) {
+        const int modifiers[] = {VK_CONTROL, VK_SHIFT, VK_MENU};
+        for (const int modifier : modifiers) {
+            const bool required = std::find(combo.modifiers.begin(), combo.modifiers.end(), modifier) != combo.modifiers.end();
+            if (!required && key_down_[modifier]) {
+                return false;
+            }
         }
     }
     if (combo.key < 0 || combo.key >= 256) return false;
@@ -242,14 +272,14 @@ bool HotkeyManager::onKeyboardEvent(int vk, bool down) {
             if (hk.combo.key != vk && hk.combo.key != norm) continue;
 
             if (hk.state_mode) {
-                const bool now = comboDownFromState(hk.combo);
+                const bool now = comboDownFromState(hk.combo, false);
                 if (now != hk.was_down) {
                     if (hk.state_callback) states_to_fire.emplace_back(hk.state_callback, now);
                     hk.was_down = now;
                 }
                 if (hk.intercept) intercept = true;
             } else {
-                const bool now = comboDownFromState(hk.combo);
+                const bool now = comboDownFromState(hk.combo, true);
                 if (now && !hk.was_down && hk.callback) {
                     to_fire.push_back(hk.callback);
                 }
@@ -286,6 +316,11 @@ void HotkeyManager::hookLoop() {
     s_active = this;
     hook_ = SetWindowsHookExW(WH_KEYBOARD_LL, &HotkeyManager::lowLevelKeyboardProc,
                               GetModuleHandleW(nullptr), 0);
+    hook_ready_ = hook_ != nullptr;
+    if (!hook_ready_) {
+        std::cerr << "[hotkey] WH_KEYBOARD_LL hook install failed: " << GetLastError()
+                  << ". Falling back to keyboard polling.\n";
+    }
     MSG msg;
     while (running_ && GetMessage(&msg, nullptr, 0, 0) > 0) {
         TranslateMessage(&msg);
@@ -295,6 +330,7 @@ void HotkeyManager::hookLoop() {
         UnhookWindowsHookEx(hook_);
         hook_ = nullptr;
     }
+    hook_ready_ = false;
     s_active = nullptr;
     key_down_.fill(false);
 }

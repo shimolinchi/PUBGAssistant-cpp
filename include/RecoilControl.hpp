@@ -60,6 +60,9 @@ private:
     // 轮询左键状态，同步 fire_key，并在压枪开启时按曲线移动鼠标。
     void workerLoop();
     std::string scopeEdgeRegionName() const;
+    void startSrBreathTrackingLocked();
+    ScopeMotionTracker* ensureSrTrackerLocked();
+    void stopSrBreathTrackingLocked();
     void applySrBreathControl(ScreenCapture& capture);
 
     // 外部依赖：读取 recoil_settings 和 hotkeys.fire_key。
@@ -111,14 +114,17 @@ private:
     int sr_miss_limit_ = 3;
     double sr_min_confidence_ = 0.25;
     bool sr_invert_y_ = true;
+    Json sr_tracker_config_ = Json::object();
     double sr_probe_seconds_ = 2.0;
     double sr_scope_lost_seconds_ = 2.0;
     int sr_scope_confirm_frames_ = 3;
     int sr_miss_count_ = 0;
     int sr_edge_hit_streak_ = 0;
+    bool sr_scope_active_ = false;
     double sr_probe_until_ = 0.0;
     double sr_last_confirmed_edge_time_ = 0.0;
     double sr_last_track_time_ = 0.0;
+    std::string sr_tracker_region_name_;
 };
 
 } // namespace pubg

@@ -32,6 +32,9 @@ public:
     // 对应 Python 版 on_tab_press，用于打开装备栏时马上识别一次。
     void onTabPress();
 
+    // 请求 worker 线程在下一帧强制扫描一次（鼠标左键松开等外部事件触发）。
+    void requestScan();
+
     // 获取最近一次识别到的两个武器槽位信息。
     [[nodiscard]] std::map<int, WeaponSlotInfo> currentWeapons() const;
 
@@ -44,6 +47,10 @@ private:
 
     // 完整识别某个槽位：武器名、倍镜、握把、枪口、枪托。
     WeaponSlotInfo detectWeapon(ScreenCapture& capture, int slot);
+
+    // 识别当前装备栏两个槽位，只用识别到武器名的结果覆盖 current_（空结果不覆盖），
+    // 有更新时回调通知。供 onTabPress 和后台上升沿复用。
+    void scanCurrentEquipment(ScreenCapture& capture);
 
     // 后台循环：装备栏可见时持续识别，不可见超过 idle_timeout 后清空。
     void run();
@@ -60,9 +67,7 @@ private:
     double idle_timeout_ = 10.0;
 
     // 各类别模板匹配阈值。名称阈值和配件阈值分开，便于后续调参。
-    std::unordered_map<std::string, double> thresholds_{
-        {"names", 0.55}, {"scopes", 0.65}, {"grips", 0.4}, {"muzzles", 0.4}, {"stocks", 0.4}
-    };
+    static double thresholdFor(const std::string& key);
 
     // 装备栏模板缓存：武器名走灰度模板，配件走带 mask 的彩色模板，编号用于判断装备栏打开。
     std::unordered_map<std::string, std::vector<cv::Mat>> name_templates_;
@@ -76,6 +81,9 @@ private:
     mutable std::mutex mutex_;
     std::atomic_bool enabled_{false};
     std::atomic_bool stop_{false};
+    std::atomic_bool active_{false};
+    // 外部请求强制扫描一次（Tab 打开、鼠标左键松开）。worker 线程消费后清零。
+    std::atomic_bool scan_requested_{false};
     std::thread worker_;
     Callback callback_;
     StatusCallback status_callback_;
@@ -85,6 +93,7 @@ private:
     // 最近一次检测到装备栏编号的时间，用于 idle_timeout 清空逻辑。
     double last_detected_time_ = 0.0;
     double confirming_until_time_ = 0.0;
+    int consecutive_no_numbers_ = 0;
 
     // 线程安全地复制当前回调，避免后台线程和 UI 线程同时访问 std::function。
     Callback callbackCopy() const;

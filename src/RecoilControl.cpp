@@ -14,6 +14,12 @@ RecoilControl::RecoilControl(Config& config, RegionManager* regions) : config_(c
 RecoilControl::~RecoilControl() {
     running_ = false;
 #if PUBG_ENABLE_INPUT_CONTROL
+    {
+        std::lock_guard lock(mutex_);
+        stopSrBreathTrackingLocked();
+        firing_ = false;
+        fire_start_ = 0.0;
+    }
     if (worker_.joinable()) {
         worker_.join();
     }
@@ -78,6 +84,7 @@ void RecoilControl::loadConfig() {
     sr_probe_seconds_ = sr_cfg.value("probe_seconds", sr_probe_seconds_);
     sr_scope_lost_seconds_ = sr_cfg.value("scope_lost_seconds", sr_scope_lost_seconds_);
     sr_scope_confirm_frames_ = sr_cfg.value("scope_confirm_frames", sr_scope_confirm_frames_);
+    sr_tracker_config_ = sr_cfg.value("edge_tracker", Json::object());
 
     weapon_configs_.clear();
     const auto weapons = rc.value("weapons", Json::object());
@@ -131,7 +138,7 @@ void RecoilControl::setEnabled(bool enabled) {
 #if PUBG_ENABLE_INPUT_CONTROL
         InputController::keyUp(fire_vk_);
 #endif
-        sr_breath_enabled_ = false;
+        stopSrBreathTrackingLocked();
     }
 }
 
@@ -148,7 +155,10 @@ void RecoilControl::updateCurrentWeapon(const std::string& weapon) {
 #endif
     auto it = weapon_configs_.find(weapon);
     if (it == weapon_configs_.end()) {
+        weapon_type_ = "ar";
         recoil_curve_.clear();
+        auto_fire_ = false;
+        stopSrBreathTrackingLocked();
         return;
     }
     weapon_type_ = it->second.value("type", "ar");
@@ -212,17 +222,12 @@ void RecoilControl::workerLoop() {
         const bool right = InputController::isKeyDown(VK_RBUTTON);
         {
             std::lock_guard lock(mutex_);
-            delay_seconds = recoil_delay_;
+            delay_seconds = sr_breath_enabled_ ? sr_track_interval_ : recoil_delay_;
             if (right && !last_right) {
-                sr_breath_enabled_ = enabled_ && weapon_type_ == "sr" && !current_weapon_.empty();
-                sr_scope_ready_time_ = nowSeconds() + sr_scope_delay_;
-                sr_probe_until_ = nowSeconds() + sr_probe_seconds_;
-                sr_miss_count_ = 0;
-                sr_edge_hit_streak_ = 0;
-                sr_last_confirmed_edge_time_ = 0.0;
-                sr_last_track_time_ = 0.0;
-                if (sr_breath_enabled_ && regions_) {
-                    sr_tracker_ = std::make_unique<ScopeMotionTracker>(*regions_, scopeEdgeRegionName());
+                if (sr_breath_enabled_) {
+                    stopSrBreathTrackingLocked();
+                } else {
+                    startSrBreathTrackingLocked();
                 }
             }
             if (left && !last_left) {
@@ -271,30 +276,124 @@ std::string RecoilControl::scopeEdgeRegionName() const {
     return "scope_top_edge_4x_region";
 }
 
+void RecoilControl::startSrBreathTrackingLocked() {
+    sr_breath_enabled_ = enabled_ && weapon_type_ == "sr" && !current_weapon_.empty();
+    const double now = nowSeconds();
+    sr_scope_ready_time_ = now + std::max(0.0, sr_scope_delay_);
+    sr_probe_until_ = sr_scope_ready_time_ + std::max(0.1, sr_probe_seconds_);
+    sr_miss_count_ = 0;
+    sr_edge_hit_streak_ = 0;
+    sr_scope_active_ = false;
+    sr_last_confirmed_edge_time_ = 0.0;
+    sr_last_track_time_ = 0.0;
+    if (!sr_breath_enabled_) {
+        stopSrBreathTrackingLocked();
+        return;
+    }
+    if (auto* tracker = ensureSrTrackerLocked()) {
+        tracker->reset();
+    }
+}
+
+ScopeMotionTracker* RecoilControl::ensureSrTrackerLocked() {
+    if (!regions_) {
+        return nullptr;
+    }
+    const std::string region_name = scopeEdgeRegionName();
+    if (sr_tracker_) {
+        if (region_name != sr_tracker_region_name_) {
+            sr_tracker_->setRegionName(region_name);
+            sr_tracker_region_name_ = region_name;
+        }
+        return sr_tracker_.get();
+    }
+
+    Json tracker_cfg = Json{
+        {"min_gradient", 0.12},
+        {"min_bright_ratio", 0.35},
+        {"max_edge_jump", std::max(20.0, static_cast<double>(sr_max_step_) * 4.0)}
+    };
+    if (sr_tracker_config_.is_object()) {
+        for (auto it = sr_tracker_config_.begin(); it != sr_tracker_config_.end(); ++it) {
+            tracker_cfg[it.key()] = it.value();
+        }
+    }
+    sr_tracker_region_name_ = region_name;
+    sr_tracker_ = std::make_unique<ScopeMotionTracker>(*regions_, sr_tracker_region_name_, tracker_cfg);
+    return sr_tracker_.get();
+}
+
+void RecoilControl::stopSrBreathTrackingLocked() {
+    sr_breath_enabled_ = false;
+    sr_scope_ready_time_ = 0.0;
+    sr_miss_count_ = 0;
+    sr_probe_until_ = 0.0;
+    sr_scope_active_ = false;
+    sr_edge_hit_streak_ = 0;
+    sr_last_confirmed_edge_time_ = 0.0;
+    sr_last_track_time_ = 0.0;
+    sr_tracker_.reset();
+    sr_tracker_region_name_.clear();
+}
+
 void RecoilControl::applySrBreathControl(ScreenCapture& capture) {
 #if PUBG_ENABLE_INPUT_CONTROL
     std::lock_guard lock(mutex_);
-    if (!sr_breath_enabled_ || !enabled_ || weapon_type_ != "sr" || !sr_tracker_) return;
+    if (!sr_breath_enabled_) return;
+    if (!enabled_ || weapon_type_ != "sr" || current_weapon_.empty()) {
+        stopSrBreathTrackingLocked();
+        return;
+    }
     const double now = nowSeconds();
     if (now < sr_scope_ready_time_) return;
     if (now - sr_last_track_time_ < sr_track_interval_) return;
     sr_last_track_time_ = now;
-    auto [dy, confidence, found] = sr_tracker_->detectMotion(capture);
+
+    auto* tracker = ensureSrTrackerLocked();
+    if (!tracker) {
+        stopSrBreathTrackingLocked();
+        return;
+    }
+
+    auto [dy, confidence, found] = tracker->detectMotion(capture);
     if (!found || confidence < sr_min_confidence_) {
         ++sr_miss_count_;
-        if (sr_miss_count_ >= sr_miss_limit_ && now > sr_probe_until_ &&
-            (sr_last_confirmed_edge_time_ <= 0.0 || now - sr_last_confirmed_edge_time_ > sr_scope_lost_seconds_)) {
-            sr_breath_enabled_ = false;
-            sr_tracker_.reset();
+        sr_edge_hit_streak_ = 0;
+        if (!sr_scope_active_ && now > sr_probe_until_) {
+            stopSrBreathTrackingLocked();
+        } else if (sr_scope_active_ && sr_last_confirmed_edge_time_ > 0.0 &&
+            now - sr_last_confirmed_edge_time_ >= std::max(0.1, sr_scope_lost_seconds_)) {
+            stopSrBreathTrackingLocked();
         }
         return;
     }
+
     sr_miss_count_ = 0;
     ++sr_edge_hit_streak_;
-    if (sr_edge_hit_streak_ < sr_scope_confirm_frames_) return;
-    sr_last_confirmed_edge_time_ = now;
+    const int confirm_frames = std::max(1, sr_scope_confirm_frames_);
+    if (sr_edge_hit_streak_ >= confirm_frames) {
+        if (!sr_scope_active_) {
+            tracker->reset();
+            sr_edge_hit_streak_ = 0;
+            sr_scope_active_ = true;
+            sr_last_confirmed_edge_time_ = now;
+            return;
+        }
+        sr_last_confirmed_edge_time_ = now;
+    } else if (sr_scope_active_) {
+        return;
+    }
+
+    if (!sr_scope_active_) {
+        if (now > sr_probe_until_) {
+            stopSrBreathTrackingLocked();
+        }
+        return;
+    }
+
     int move = static_cast<int>(std::round((sr_invert_y_ ? -dy : dy) * sr_move_scale_));
-    move = std::max(-sr_max_step_, std::min(sr_max_step_, move));
+    const int max_step = std::max(1, sr_max_step_);
+    move = std::max(-max_step, std::min(max_step, move));
     if (move != 0) InputController::moveMouseRelative(0, move);
 #else
     (void)capture;

@@ -30,6 +30,8 @@
 
 namespace pubg::ui {
 
+class ScaleCalibrationWindow;
+
 // Qt 主窗口，对应 Python main.py 中 TacticalHub 的可见控制台。
 // 目标是还原 280x372 半透明、置顶、无边框、四个选项卡的交互。
 class MainWindow : public QMainWindow {
@@ -145,6 +147,7 @@ private:
     QHash<QString, QLabel*> hotkey_labels_;
     QHash<QString, RoundedButton*> assistant_buttons_;
     OverlayWindow debug_overlay_;
+    ScaleCalibrationWindow* scale_calibration_window_ = nullptr;
 };
 
 } // namespace pubg::ui
