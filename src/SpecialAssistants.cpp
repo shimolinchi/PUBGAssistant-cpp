@@ -158,6 +158,8 @@ void SpecialAssistants::drawRocket(const DistanceMap& dists, const std::unordere
     const double cx = regions_.screenWidth() / 2.0;
     const double cy = regions_.screenHeight() / 2.0;
     const double line_len = regions_.screenHeight() * 0.42;
+    cmds.push_back({OverlayCommand::Type::Line, cx, cy, cx, regions_.screenHeight() * 0.9,
+                    0, "", hexToBgr("#FFFFFF"), 1, 18, 255});
     for (const auto& [color, dist] : dists) {
         if (dist <= 0.0 || dist > 170.0) {
             continue;

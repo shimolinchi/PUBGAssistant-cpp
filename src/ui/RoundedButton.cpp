@@ -12,7 +12,7 @@ RoundedButton::RoundedButton(const QString& text, QWidget* parent) : QPushButton
 }
 
 void RoundedButton::configure(int width, int height, int radius, int pixel_font_size) {
-    setFixedSize(width, height);
+    resize(width, height);
     radius_ = radius;
     pixel_font_size_ = pixel_font_size;
     refresh();

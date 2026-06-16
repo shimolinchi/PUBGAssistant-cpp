@@ -7,7 +7,9 @@
 #include <iostream>
 #include <tuple>
 #include <QApplication>
+#include <QGuiApplication>
 #include <QMetaObject>
+#include <QScreen>
 
 #if defined(_WIN32) && defined(_DEBUG)
 #include <crtdbg.h>
@@ -54,7 +56,7 @@ App::App()
     PUBG_HEAP_PROBE("ctor.afterElevation");
     weapon_detector_ = std::make_unique<WeaponDetector>(config_, *regions_, 30, 0.65);
     PUBG_HEAP_PROBE("ctor.afterWeaponDetector");
-    equipment_detector_ = std::make_unique<EquipmentDetector>(config_, *regions_, 15, 10.0);
+    equipment_detector_ = std::make_unique<EquipmentDetector>(config_, *regions_, 30, 10.0);
     PUBG_HEAP_PROBE("ctor.afterEquipmentDetector");
     gesture_identifier_ = std::make_unique<GestureIdentifier>(config_, *regions_, 30, 0.65);
     PUBG_HEAP_PROBE("ctor.afterGestureIdentifier");
@@ -557,6 +559,13 @@ void App::syncRecoilAttachmentsForCurrentWeapon() {
     if (!isRecoilWeapon(current_weapon)) {
         return;
     }
+    const auto slot1 = equipment.find(1);
+    const auto slot2 = equipment.find(2);
+    if (slot1 != equipment.end() && slot2 != equipment.end() &&
+        slot1->second.name == current_weapon && slot2->second.name == current_weapon) {
+        recoil_->updateAttachments(slot2->second);
+        return;
+    }
     for (const auto& [_, info] : equipment) {
         if (info.name == current_weapon) {
             recoil_->updateAttachments(info);
@@ -676,6 +685,11 @@ int App::run() {
                                 *equipment_detector_, *gesture_identifier_, *recoil_, *special_,
                                 *map_points_, *large_map_, *throwables_, *c4_, std::move(callbacks));
     main_window_ = &window;
+    if (auto* screen = QGuiApplication::primaryScreen()) {
+        window.move(screen->availableGeometry().topLeft());
+    } else {
+        window.move(0, 0);
+    }
     window.show();
     hotkeys_.start();
     const int code = QApplication::exec();

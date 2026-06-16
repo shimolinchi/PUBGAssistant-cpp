@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Target Name="Build">
+    <Message Text="This alias project file is kept only for compatibility. Please open PUBGAssistant-cpp.vcxproj instead." Importance="high" />
+    <Error Text="Open PUBGAssistant-cpp.vcxproj instead of PUBGAssistantCpp.vcxproj." />
+  </Target>
+</Project>

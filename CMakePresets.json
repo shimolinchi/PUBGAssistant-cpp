@@ -26,6 +26,7 @@
         "HTTPS_PROXY": "http://127.0.0.1:7890"
       },
       "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
         "CMAKE_MAKE_PROGRAM": "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe",
         "CMAKE_TOOLCHAIN_FILE": "C:/Program Files/Microsoft Visual Studio/18/Community/VC/vcpkg/scripts/buildsystems/vcpkg.cmake",
@@ -39,7 +40,9 @@
       "inherits": "windows-x64-debug",
       "binaryDir": "C:/Projects/PUBGAssistant-cpp/.build/release",
       "installDir": "C:/Projects/PUBGAssistant-cpp/.build/install/release",
-      "cacheVariables": {}
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
     }
   ],
   "buildPresets": [

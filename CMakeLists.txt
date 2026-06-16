@@ -13,6 +13,7 @@ find_package(Qt6 CONFIG REQUIRED COMPONENTS Widgets)
 set(CMAKE_AUTOMOC ON)
 
 add_executable(PUBGAssistantCpp
+    resources/PUBGAssistantCpp.manifest
     src/main.cpp
     src/App.cpp
     src/Config.cpp
@@ -74,6 +75,10 @@ if(WIN32)
         _UNICODE
     )
     target_compile_options(PUBGAssistantCpp PRIVATE /utf-8)
+    target_link_options(PUBGAssistantCpp PRIVATE
+        $<$<CONFIG:Release>:/SUBSYSTEM:WINDOWS>
+        $<$<CONFIG:Release>:/ENTRY:mainCRTStartup>
+    )
     target_link_libraries(PUBGAssistantCpp PRIVATE
         user32
         gdi32
@@ -103,3 +108,15 @@ add_custom_command(TARGET PUBGAssistantCpp POST_BUILD
         ${CMAKE_SOURCE_DIR}/icon.ico
         $<TARGET_FILE_DIR:PUBGAssistantCpp>/icon.ico
 )
+
+if(CMAKE_BUILD_TYPE STREQUAL "Release")
+    add_custom_target(package_release_runtime ALL
+        COMMAND ${CMAKE_COMMAND}
+            -DSOURCE_DIR=${CMAKE_SOURCE_DIR}
+            -DBUILD_DIR=$<TARGET_FILE_DIR:PUBGAssistantCpp>
+            -DPACKAGE_DIR=${CMAKE_SOURCE_DIR}/.build/package/release
+            -P ${CMAKE_SOURCE_DIR}/cmake/package_runtime.cmake
+        DEPENDS PUBGAssistantCpp
+        COMMENT "Packaging PUBGAssistantCpp release runtime"
+    )
+endif()

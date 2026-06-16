@@ -3,6 +3,10 @@
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QCursor>
+#include <QGuiApplication>
+#include <QScreen>
+#include <cmath>
 
 namespace pubg::ui {
 
@@ -12,6 +16,13 @@ RegionCalibrationOverlay::RegionCalibrationOverlay(RegionManager& regions, QStri
     setAttribute(Qt::WA_TranslucentBackground, true);
     setWindowOpacity(0.99);
     setCursor(Qt::CrossCursor);
+    if (QScreen* screen = QGuiApplication::screenAt(QCursor::pos())) {
+        setGeometry(screen->geometry());
+        setScreen(screen);
+    } else if (QScreen* screen = QGuiApplication::primaryScreen()) {
+        setGeometry(screen->geometry());
+        setScreen(screen);
+    }
 }
 
 void RegionCalibrationOverlay::paintEvent(QPaintEvent*) {
@@ -46,7 +57,10 @@ void RegionCalibrationOverlay::mouseReleaseEvent(QMouseEvent* event) {
     current_ = event->pos();
     dragging_ = false;
     if (mode_ == Mode::Scale) {
-        const double len = std::hypot(current_.x() - start_.x(), current_.y() - start_.y());
+        const QPoint physical_start = toPhysical(start_);
+        const QPoint physical_current = toPhysical(current_);
+        const double len = std::hypot(physical_current.x() - physical_start.x(),
+                                      physical_current.y() - physical_start.y());
         regions_.setRealScale(target_name_.toStdString(), len);
     } else {
         QRect r(start_, current_);
@@ -55,7 +69,16 @@ void RegionCalibrationOverlay::mouseReleaseEvent(QMouseEvent* event) {
             r = QRect(start_, QPoint(start_.x() + (r.width() >= 0 ? side : -side), start_.y() + (r.height() >= 0 ? side : -side)));
         }
         r = r.normalized();
-        regions_.setRealRegion(target_name_.toStdString(), Rect{r.left(), r.top(), r.width(), r.height()});
+        const QPoint physical_top_left = toPhysical(r.topLeft());
+        const QPoint physical_bottom_right = toPhysical(r.bottomRight());
+        QRect physical_rect(physical_top_left, physical_bottom_right);
+        physical_rect = physical_rect.normalized();
+        regions_.setRealRegion(target_name_.toStdString(), Rect{
+            physical_rect.left(),
+            physical_rect.top(),
+            physical_rect.width() + 1,
+            physical_rect.height() + 1
+        });
     }
     close();
     deleteLater();
@@ -66,6 +89,15 @@ void RegionCalibrationOverlay::keyPressEvent(QKeyEvent* event) {
         close();
         deleteLater();
     }
+}
+
+QPoint RegionCalibrationOverlay::toPhysical(const QPoint& point) const {
+    const double scale = devicePixelRatioF();
+    const QPoint top_left = geometry().topLeft();
+    return {
+        static_cast<int>(std::round((top_left.x() + point.x()) * scale)),
+        static_cast<int>(std::round((top_left.y() + point.y()) * scale))
+    };
 }
 
 } // namespace pubg::ui

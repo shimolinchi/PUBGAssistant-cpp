@@ -8,9 +8,14 @@
 #include <QMouseEvent>
 #include <QPoint>
 #include <QStackedWidget>
+#include <QStringList>
 #include <QTimer>
 #include <QVector>
 #include <functional>
+
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 #include "C4Assistant.hpp"
 #include "Config.hpp"
@@ -74,10 +79,20 @@ protected:
     void mousePressEvent(QMouseEvent* event) override;
     void mouseMoveEvent(QMouseEvent* event) override;
     void keyPressEvent(QKeyEvent* event) override;
+#ifdef _WIN32
+    bool nativeEvent(const QByteArray& eventType, void* message, qintptr* result) override;
+#endif
     void closeEvent(QCloseEvent* event) override;
     void resizeEvent(QResizeEvent* event) override;
 
 private:
+#ifdef _WIN32
+    static LRESULT CALLBACK captureKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam);
+    void startCaptureHook();
+    void stopCaptureHook();
+    void handleCapturedHardwareKey(QString key, QStringList modifiers);
+#endif
+
     // 构建窗口标题栏、tab bar 和四个页面。
     void buildUi();
     void buildTitleBar(QWidget* root);
@@ -104,6 +119,7 @@ private:
     void openSpecialWeaponDebugger();
     void applyCaptureExclusion();
     void beginCaptureHotkey(const QString& action);
+    bool captureHotkey(const QString& key, const QStringList& modifiers);
     void saveHotkeys();
     void resetDefaultHotkeys();
     QString formatHotkey(const std::string& value) const;
@@ -136,6 +152,10 @@ private:
     bool debug_overlay_enabled_ = false;
     bool closing_ = false;
     QString capturing_action_;
+#ifdef _WIN32
+    HHOOK capture_hook_ = nullptr;
+    static MainWindow* s_capture_window_;
+#endif
     RoundedButton* btn_weapon_detect_ = nullptr;
     RoundedButton* btn_display_ = nullptr;
     RoundedButton* btn_recoil_ = nullptr;

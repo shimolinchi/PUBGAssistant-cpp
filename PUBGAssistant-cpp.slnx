@@ -3,5 +3,5 @@
     <Platform Name="x64" />
     <Platform Name="x86" />
   </Configurations>
-  <Project Path="PUBGAssistant-cpp.vcxproj" />
+  <Project Path="PUBGAssistant-cpp.vcxproj" Id="db1bede9-c53c-4903-b436-9095d018ae6e" />
 </Solution>

@@ -179,9 +179,9 @@ void MinimapRadar::run() {
             if (!nms.empty()) {
                 auto item = nms.front();
                 if (auto it = stable_targets_.find(c.name); it != stable_targets_.end()) {
-                    item.x = it->second.x * 0.70 + item.x * 0.30;
-                    item.y = it->second.y * 0.70 + item.y * 0.30;
-                    item.distance_m = it->second.distance_m * 0.70 + item.distance_m * 0.30;
+                    item.x = it->second.x * 0.35 + item.x * 0.65;
+                    item.y = it->second.y * 0.35 + item.y * 0.65;
+                    item.distance_m = it->second.distance_m * 0.35 + item.distance_m * 0.65;
                     item.confidence = std::max(item.confidence, it->second.confidence);
                 }
                 stable_targets_[c.name] = item;
@@ -189,7 +189,7 @@ void MinimapRadar::run() {
                 distances[c.name] = item.distance_m;
                 found.push_back(item);
             } else if (auto seen = stable_seen_times_.find(c.name);
-                       seen != stable_seen_times_.end() && now - seen->second <= 0.25 &&
+                       seen != stable_seen_times_.end() && now - seen->second <= 0.10 &&
                        stable_targets_.contains(c.name)) {
                 const auto item = stable_targets_[c.name];
                 distances[c.name] = item.distance_m;

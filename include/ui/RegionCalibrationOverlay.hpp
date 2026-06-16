@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QPoint>
 #include <QWidget>
 
 #include "RegionManager.hpp"
@@ -23,6 +24,8 @@ protected:
     void keyPressEvent(QKeyEvent* event) override;
 
 private:
+    [[nodiscard]] QPoint toPhysical(const QPoint& point) const;
+
     RegionManager& regions_;
     QString target_name_;
     Mode mode_;

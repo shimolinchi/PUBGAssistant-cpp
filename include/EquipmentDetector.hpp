@@ -17,7 +17,7 @@ public:
     using StatusCallback = std::function<void(const std::string&)>;
 
     // fps 控制后台扫描频率；idle_timeout 用于装备栏长时间不可见后清空结果。
-    EquipmentDetector(Config& config, RegionManager& regions, int fps = 15, double idle_timeout = 10.0);
+    EquipmentDetector(Config& config, RegionManager& regions, int fps = 30, double idle_timeout = 10.0);
 
     // 停止后台线程。
     ~EquipmentDetector();

@@ -29,6 +29,104 @@
 
 namespace pubg::ui {
 
+#ifdef _WIN32
+MainWindow* MainWindow::s_capture_window_ = nullptr;
+#endif
+
+namespace {
+
+QString functionKeyFromNativeScanCode(quint32 scan_code) {
+    switch (scan_code) {
+        case 0x3B: return QStringLiteral("<f1>");
+        case 0x3C: return QStringLiteral("<f2>");
+        case 0x3D: return QStringLiteral("<f3>");
+        case 0x3E: return QStringLiteral("<f4>");
+        case 0x3F: return QStringLiteral("<f5>");
+        case 0x40: return QStringLiteral("<f6>");
+        case 0x41: return QStringLiteral("<f7>");
+        case 0x42: return QStringLiteral("<f8>");
+        case 0x43: return QStringLiteral("<f9>");
+        case 0x44: return QStringLiteral("<f10>");
+        case 0x57: return QStringLiteral("<f11>");
+        case 0x58: return QStringLiteral("<f12>");
+        default: return {};
+    }
+}
+
+QString supportedHotkeyFromEvent(QKeyEvent* event) {
+    if (const QString physical_function_key = functionKeyFromNativeScanCode(event->nativeScanCode());
+        !physical_function_key.isEmpty()) {
+        return physical_function_key;
+    }
+    if (event->key() >= Qt::Key_A && event->key() <= Qt::Key_Z) return QString(QChar('a' + event->key() - Qt::Key_A));
+    if (event->key() >= Qt::Key_0 && event->key() <= Qt::Key_9) return QString(QChar('0' + event->key() - Qt::Key_0));
+    if (event->key() >= Qt::Key_F1 && event->key() <= Qt::Key_F12) return QString("<f%1>").arg(event->key() - Qt::Key_F1 + 1);
+    if (event->key() == Qt::Key_Tab) return QStringLiteral("tab");
+    if (event->key() == Qt::Key_Space) return QStringLiteral("<space>");
+    if (event->key() == Qt::Key_End) return QStringLiteral("end");
+    if (event->key() == Qt::Key_Home) return QStringLiteral("<home>");
+    return {};
+}
+
+QStringList activeModifierNames(QKeyEvent* event) {
+    QStringList modifiers;
+#ifdef _WIN32
+    if (GetAsyncKeyState(VK_CONTROL) & 0x8000) modifiers << QStringLiteral("<ctrl>");
+    if (GetAsyncKeyState(VK_SHIFT) & 0x8000) modifiers << QStringLiteral("<shift>");
+    if (GetAsyncKeyState(VK_MENU) & 0x8000) modifiers << QStringLiteral("<alt>");
+#else
+    const auto mods = event->modifiers();
+    if (mods.testFlag(Qt::ControlModifier)) modifiers << QStringLiteral("<ctrl>");
+    if (mods.testFlag(Qt::ShiftModifier)) modifiers << QStringLiteral("<shift>");
+    if (mods.testFlag(Qt::AltModifier)) modifiers << QStringLiteral("<alt>");
+#endif
+    return modifiers;
+}
+
+#ifdef _WIN32
+QString supportedHotkeyFromWindowsMessage(const MSG* msg) {
+    const auto vk = static_cast<int>(msg->wParam);
+    const auto scan_code = static_cast<quint32>((msg->lParam >> 16) & 0xff);
+    if (const QString physical_function_key = functionKeyFromNativeScanCode(scan_code);
+        !physical_function_key.isEmpty()) {
+        return physical_function_key;
+    }
+    if (vk >= 'A' && vk <= 'Z') return QString(QChar('a' + vk - 'A'));
+    if (vk >= '0' && vk <= '9') return QString(QChar('0' + vk - '0'));
+    if (vk == VK_TAB) return QStringLiteral("tab");
+    if (vk == VK_SPACE) return QStringLiteral("<space>");
+    if (vk == VK_END) return QStringLiteral("end");
+    if (vk == VK_HOME) return QStringLiteral("<home>");
+    return {};
+}
+
+QStringList activeModifierNames() {
+    QStringList modifiers;
+    if (GetAsyncKeyState(VK_CONTROL) & 0x8000) modifiers << QStringLiteral("<ctrl>");
+    if (GetAsyncKeyState(VK_SHIFT) & 0x8000) modifiers << QStringLiteral("<shift>");
+    if (GetAsyncKeyState(VK_MENU) & 0x8000) modifiers << QStringLiteral("<alt>");
+    return modifiers;
+}
+
+QString supportedHotkeyFromLowLevelHook(const KBDLLHOOKSTRUCT* kb) {
+    const auto scan_code = static_cast<quint32>(kb->scanCode & 0xff);
+    if (const QString physical_function_key = functionKeyFromNativeScanCode(scan_code);
+        !physical_function_key.isEmpty()) {
+        return physical_function_key;
+    }
+    const auto vk = static_cast<int>(kb->vkCode);
+    if (vk >= 'A' && vk <= 'Z') return QString(QChar('a' + vk - 'A'));
+    if (vk >= '0' && vk <= '9') return QString(QChar('0' + vk - '0'));
+    if (vk == VK_TAB) return QStringLiteral("tab");
+    if (vk == VK_SPACE) return QStringLiteral("<space>");
+    if (vk == VK_END) return QStringLiteral("end");
+    if (vk == VK_HOME) return QStringLiteral("<home>");
+    return {};
+}
+#endif
+
+} // namespace
+
 MainWindow::MainWindow(Config& config,
                        RegionManager& regions,
                        MinimapRadar& minimap,
@@ -97,7 +195,11 @@ void MainWindow::applyNativeRoundedRegion() {
 #ifdef _WIN32
     HWND hwnd = reinterpret_cast<HWND>(winId());
     if (!hwnd) return;
-    HRGN region = CreateRoundRectRgn(0, 0, width() + 1, height() + 1, 36, 36);
+    const double scale = devicePixelRatioF();
+    const int physical_w = static_cast<int>(std::ceil(width() * scale));
+    const int physical_h = static_cast<int>(std::ceil(height() * scale));
+    const int physical_radius = static_cast<int>(std::round(36.0 * scale));
+    HRGN region = CreateRoundRectRgn(0, 0, physical_w + 1, physical_h + 1, physical_radius, physical_radius);
     if (region && !SetWindowRgn(hwnd, region, TRUE)) {
         DeleteObject(region);
     }
@@ -328,7 +430,7 @@ void MainWindow::buildCalibrationTab(QWidget* tab) {
         b->setGeometry(2 + col * 87 + (col == 2 ? 1 : 0), 41 + (row - 1) * 37, 82, 33);
         connect(b, &QPushButton::clicked, this, [this, key, scale, square_keys] {
             auto* ov = new RegionCalibrationOverlay(regions_, key, scale ? RegionCalibrationOverlay::Mode::Scale : RegionCalibrationOverlay::Mode::Region, square_keys.contains(key));
-            ov->showFullScreen();
+            ov->show();
         });
     };
     btn_debug_ = new RoundedButton(QStringLiteral("显示所有区域框"), tab);
@@ -359,16 +461,15 @@ void MainWindow::buildCalibrationTab(QWidget* tab) {
 void MainWindow::buildKeyTab(QWidget* tab) {
     tab->setFixedSize(262, 299);
     QVector<std::tuple<QString, QString, bool>> rows{
-        {QStringLiteral("窗口显示开关"), "toggle_window", true},
-        {QStringLiteral("手雷瞬爆"), "throw", true},
-        {QStringLiteral("辅助显示开关"), "toggle_display", true},
-        {QStringLiteral("大地图测距"), "measure_map", true},
-        {QStringLiteral("辅助压枪开关"), "toggle_recoil", true},
         {QStringLiteral("武器检测开关"), "toggle_weapon_detection", true},
+        {QStringLiteral("测距瞄准显示开关"), "toggle_display", true},
+        {QStringLiteral("辅助压枪开关"), "toggle_recoil", true},
+        {QStringLiteral("大地图测距"), "measure_map", true},
+        {QStringLiteral("窗口显示开关"), "toggle_window", true},
         {QStringLiteral("打开装备栏"), "toggle_equipment", true},
         {QStringLiteral("开火按键"), "fire_key", true},
-        {QStringLiteral("标点前后切换"), "marker_pair", true},
         {QStringLiteral("地图点位显示"), "mouse_map_assist", false},
+        {QStringLiteral("标点前后切换"), "marker_pair", true},
     };
     const auto hotkeys = config_.hotkeys();
     auto hotkeyValue = [&](const QString& action, const std::string& fallback) {
@@ -417,7 +518,7 @@ void MainWindow::buildKeyTab(QWidget* tab) {
                 ? formatHotkey(hotkeyValue(action, fallback))
                 : QStringLiteral("鼠标左键 + 中键");
             auto* value = new QLabel(display, tab);
-            value->setGeometry(value_x, y + 2, 80, 20);
+            value->setGeometry(value_x, y + 2, editable ? 80 : 132, 20);
             value->setStyleSheet("color:#2563EB;font-family:Consolas;font-size:13px;font-weight:700;");
             if (editable) {
                 hotkey_labels_[action] = value;
@@ -586,89 +687,151 @@ void MainWindow::mousePressEvent(QMouseEvent* event) { drag_offset_ = event->glo
 void MainWindow::mouseMoveEvent(QMouseEvent* event) { if (event->buttons() & Qt::LeftButton) move(event->globalPosition().toPoint() - drag_offset_); }
 void MainWindow::keyPressEvent(QKeyEvent* event) {
     if (!capturing_action_.isEmpty()) {
-        QString key;
-        if (event->key() >= Qt::Key_A && event->key() <= Qt::Key_Z) key = QString(QChar('a' + event->key() - Qt::Key_A));
-        else if (event->key() >= Qt::Key_0 && event->key() <= Qt::Key_9) key = QString(QChar('0' + event->key() - Qt::Key_0));
-        else if (event->key() >= Qt::Key_F1 && event->key() <= Qt::Key_F12) key = QString("<f%1>").arg(event->key() - Qt::Key_F1 + 1);
-        else if (event->key() == Qt::Key_Tab) key = "tab";
-        else if (event->key() == Qt::Key_Space) key = "<space>";
-        else if (event->key() == Qt::Key_End) key = "end";
-        else if (event->key() == Qt::Key_Home) key = "<home>";
-        if (!key.isEmpty()) {
-            QStringList modifiers;
-            const auto mods = event->modifiers();
-            if (mods.testFlag(Qt::ControlModifier)) modifiers << "<ctrl>";
-            if (mods.testFlag(Qt::ShiftModifier)) modifiers << "<shift>";
-            if (mods.testFlag(Qt::AltModifier)) modifiers << "<alt>";
-
-            const bool single_only = capturing_action_ == "throw" || capturing_action_ == "toggle_equipment" || capturing_action_ == "fire_key";
-            if (single_only && !modifiers.isEmpty()) {
-                const QString action = capturing_action_;
-                if (hotkey_labels_.contains(action)) {
-                    hotkey_labels_[action]->setText(QStringLiteral("仅允许单键"));
-                    QTimer::singleShot(1000, this, [this, action] {
-                        if (hotkey_labels_.contains(action)) {
-                            const auto stored = config_.read([&](const Json& data) {
-                                return data.value("hotkeys", Json::object()).value(action.toStdString(), std::string(""));
-                            });
-                            hotkey_labels_[action]->setText(formatHotkey(stored));
-                        }
-                    });
-                }
-                capturing_action_.clear();
-                return;
-            }
-
-            QString combo = key;
-            if (!modifiers.isEmpty()) {
-                combo = modifiers.join("+") + "+" + key;
-            }
-            const auto existing_hotkeys = config_.hotkeys();
-            const std::string combo_std = combo.toStdString();
-            const std::string action_std = capturing_action_.toStdString();
-            auto hotkeyOr = [&](const std::string& key_name, const std::string& fallback) {
-                const auto it = existing_hotkeys.find(key_name);
-                return it == existing_hotkeys.end() ? fallback : it->second;
-            };
-            const bool conflict = std::any_of(existing_hotkeys.begin(), existing_hotkeys.end(), [&](const auto& item) {
-                return item.first != action_std && item.second == combo_std;
-            });
-            if (conflict || (action_std == "fire_key" && combo_std == hotkeyOr("toggle_window", "<home>")) ||
-                (action_std == "toggle_window" && combo_std == hotkeyOr("fire_key", "end"))) {
-                const QString action = capturing_action_;
-                if (hotkey_labels_.contains(action)) {
-                    hotkey_labels_[action]->setText(QStringLiteral("按键冲突"));
-                    QTimer::singleShot(1000, this, [this, action] {
-                        if (hotkey_labels_.contains(action)) {
-                            const auto stored = config_.read([&](const Json& data) {
-                                return data.value("hotkeys", Json::object()).value(action.toStdString(), std::string(""));
-                            });
-                            hotkey_labels_[action]->setText(formatHotkey(stored));
-                        }
-                    });
-                }
-                capturing_action_.clear();
-                return;
-            }
-            config_.write([&](Json& data) {
-                data["hotkeys"][capturing_action_.toStdString()] = combo.toStdString();
-            });
-            if (hotkey_labels_.contains(capturing_action_)) hotkey_labels_[capturing_action_]->setText(formatHotkey(combo.toStdString()));
-            capturing_action_.clear();
-            config_.save();
-            if (callbacks_.reload_hotkeys) callbacks_.reload_hotkeys();
-        }
+        const QString key = supportedHotkeyFromEvent(event);
+        if (!key.isEmpty()) captureHotkey(key, activeModifierNames(event));
         return;
     }
     if (event->key() == Qt::Key_Left) switchTab(-1);
     if (event->key() == Qt::Key_Right) switchTab(1);
 }
 
+#ifdef _WIN32
+bool MainWindow::nativeEvent(const QByteArray& eventType, void* message, qintptr* result) {
+    if (!capturing_action_.isEmpty() && eventType == "windows_generic_MSG") {
+        auto* msg = static_cast<MSG*>(message);
+        if (msg && (msg->message == WM_KEYDOWN || msg->message == WM_SYSKEYDOWN)) {
+            const QString key = supportedHotkeyFromWindowsMessage(msg);
+            if (!key.isEmpty()) {
+                const bool captured = captureHotkey(key, activeModifierNames());
+                if (captured) {
+                    if (result) *result = 0;
+                    return true;
+                }
+            }
+        }
+    }
+    return QMainWindow::nativeEvent(eventType, message, result);
+}
+#endif
+
 void MainWindow::beginCaptureHotkey(const QString& action) {
+    stopCaptureHook();
     capturing_action_ = action;
     if (hotkey_labels_.contains(action)) hotkey_labels_[action]->setText(QStringLiteral("请按下..."));
     setFocus(Qt::OtherFocusReason);
+    startCaptureHook();
 }
+
+bool MainWindow::captureHotkey(const QString& key, const QStringList& modifiers) {
+    if (capturing_action_.isEmpty() || key.isEmpty()) return false;
+
+    const bool single_only = capturing_action_ == "throw" || capturing_action_ == "toggle_equipment" || capturing_action_ == "fire_key";
+    if (single_only && !modifiers.isEmpty()) {
+        const QString action = capturing_action_;
+        if (hotkey_labels_.contains(action)) {
+            hotkey_labels_[action]->setText(QStringLiteral("仅允许单键"));
+            QTimer::singleShot(1000, this, [this, action] {
+                if (hotkey_labels_.contains(action)) {
+                    const auto stored = config_.read([&](const Json& data) {
+                        return data.value("hotkeys", Json::object()).value(action.toStdString(), std::string(""));
+                    });
+                    hotkey_labels_[action]->setText(formatHotkey(stored));
+                }
+            });
+        }
+        capturing_action_.clear();
+        stopCaptureHook();
+        return true;
+    }
+
+    QString combo = key;
+    if (!modifiers.isEmpty()) {
+        combo = modifiers.join("+") + "+" + key;
+    }
+    const auto existing_hotkeys = config_.hotkeys();
+    const std::string combo_std = combo.toStdString();
+    const std::string action_std = capturing_action_.toStdString();
+    auto hotkeyOr = [&](const std::string& key_name, const std::string& fallback) {
+        const auto it = existing_hotkeys.find(key_name);
+        return it == existing_hotkeys.end() ? fallback : it->second;
+    };
+    const bool conflict = std::any_of(existing_hotkeys.begin(), existing_hotkeys.end(), [&](const auto& item) {
+        return item.first != action_std && item.second == combo_std;
+    });
+    if (conflict || (action_std == "fire_key" && combo_std == hotkeyOr("toggle_window", "<home>")) ||
+        (action_std == "toggle_window" && combo_std == hotkeyOr("fire_key", "end"))) {
+        const QString action = capturing_action_;
+        if (hotkey_labels_.contains(action)) {
+            hotkey_labels_[action]->setText(QStringLiteral("按键冲突"));
+            QTimer::singleShot(1000, this, [this, action] {
+                if (hotkey_labels_.contains(action)) {
+                    const auto stored = config_.read([&](const Json& data) {
+                        return data.value("hotkeys", Json::object()).value(action.toStdString(), std::string(""));
+                    });
+                    hotkey_labels_[action]->setText(formatHotkey(stored));
+                }
+            });
+        }
+        capturing_action_.clear();
+        stopCaptureHook();
+        return true;
+    }
+
+    const QString action = capturing_action_;
+    config_.write([&](Json& data) {
+        data["hotkeys"][action.toStdString()] = combo.toStdString();
+    });
+    if (hotkey_labels_.contains(action)) hotkey_labels_[action]->setText(formatHotkey(combo.toStdString()));
+    capturing_action_.clear();
+    stopCaptureHook();
+    config_.save();
+    if (callbacks_.reload_hotkeys) callbacks_.reload_hotkeys();
+    return true;
+}
+
+#ifdef _WIN32
+LRESULT CALLBACK MainWindow::captureKeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
+    auto* self = s_capture_window_;
+    if (nCode == HC_ACTION && self && !self->capturing_action_.isEmpty()) {
+        const bool down = (wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN);
+        if (down) {
+            const auto* kb = reinterpret_cast<const KBDLLHOOKSTRUCT*>(lParam);
+            if (kb) {
+                const QString key = supportedHotkeyFromLowLevelHook(kb);
+                if (!key.isEmpty()) {
+                    const QStringList modifiers = activeModifierNames();
+                    QMetaObject::invokeMethod(self, [self, key, modifiers] {
+                        self->handleCapturedHardwareKey(key, modifiers);
+                    }, Qt::QueuedConnection);
+                    return 1;
+                }
+            }
+        }
+    }
+    return CallNextHookEx(nullptr, nCode, wParam, lParam);
+}
+
+void MainWindow::startCaptureHook() {
+    if (capture_hook_) return;
+    s_capture_window_ = this;
+    capture_hook_ = SetWindowsHookExW(WH_KEYBOARD_LL, &MainWindow::captureKeyboardProc,
+                                      GetModuleHandleW(nullptr), 0);
+}
+
+void MainWindow::stopCaptureHook() {
+    if (capture_hook_) {
+        UnhookWindowsHookEx(capture_hook_);
+        capture_hook_ = nullptr;
+    }
+    if (s_capture_window_ == this) {
+        s_capture_window_ = nullptr;
+    }
+}
+
+void MainWindow::handleCapturedHardwareKey(QString key, QStringList modifiers) {
+    captureHotkey(key, modifiers);
+}
+#endif
 
 void MainWindow::saveHotkeys() {
     config_.save();
@@ -676,6 +839,9 @@ void MainWindow::saveHotkeys() {
 }
 
 void MainWindow::closeEvent(QCloseEvent* event) {
+#ifdef _WIN32
+    stopCaptureHook();
+#endif
     if (!closing_) {
         closing_ = true;
         QApplication::quit();
