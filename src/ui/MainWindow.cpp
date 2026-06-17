@@ -62,6 +62,7 @@ QString supportedHotkeyFromEvent(QKeyEvent* event) {
     if (event->key() >= Qt::Key_0 && event->key() <= Qt::Key_9) return QString(QChar('0' + event->key() - Qt::Key_0));
     if (event->key() >= Qt::Key_F1 && event->key() <= Qt::Key_F12) return QString("<f%1>").arg(event->key() - Qt::Key_F1 + 1);
     if (event->key() == Qt::Key_Tab) return QStringLiteral("tab");
+    if (event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter) return QStringLiteral("<enter>");
     if (event->key() == Qt::Key_Space) return QStringLiteral("<space>");
     if (event->key() == Qt::Key_End) return QStringLiteral("end");
     if (event->key() == Qt::Key_Home) return QStringLiteral("<home>");
@@ -94,6 +95,7 @@ QString supportedHotkeyFromWindowsMessage(const MSG* msg) {
     if (vk >= 'A' && vk <= 'Z') return QString(QChar('a' + vk - 'A'));
     if (vk >= '0' && vk <= '9') return QString(QChar('0' + vk - '0'));
     if (vk == VK_TAB) return QStringLiteral("tab");
+    if (vk == VK_RETURN) return QStringLiteral("<enter>");
     if (vk == VK_SPACE) return QStringLiteral("<space>");
     if (vk == VK_END) return QStringLiteral("end");
     if (vk == VK_HOME) return QStringLiteral("<home>");
@@ -118,6 +120,7 @@ QString supportedHotkeyFromLowLevelHook(const KBDLLHOOKSTRUCT* kb) {
     if (vk >= 'A' && vk <= 'Z') return QString(QChar('a' + vk - 'A'));
     if (vk >= '0' && vk <= '9') return QString(QChar('0' + vk - '0'));
     if (vk == VK_TAB) return QStringLiteral("tab");
+    if (vk == VK_RETURN) return QStringLiteral("<enter>");
     if (vk == VK_SPACE) return QStringLiteral("<space>");
     if (vk == VK_END) return QStringLiteral("end");
     if (vk == VK_HOME) return QStringLiteral("<home>");
@@ -478,6 +481,7 @@ void MainWindow::buildKeyTab(QWidget* tab) {
         {QStringLiteral("测距瞄准显示开关"), "toggle_display", true},
         {QStringLiteral("辅助压枪开关"), "toggle_recoil", true},
         {QStringLiteral("大地图测距"), "measure_map", true},
+        {QStringLiteral("迫击炮自动瞄准"), "mortar_auto_aim", true},
         {QStringLiteral("窗口显示开关"), "toggle_window", true},
         {QStringLiteral("打开装备栏"), "toggle_equipment", true},
         {QStringLiteral("开火按键"), "fire_key", true},
@@ -525,6 +529,7 @@ void MainWindow::buildKeyTab(QWidget* tab) {
             connect(next_btn, &QPushButton::clicked, this, [this] { beginCaptureHotkey("marker_next"); });
         } else {
             const std::string fallback = action == "fire_key" ? "end"
+                : action == "mortar_auto_aim" ? "<f6>"
                 : action == "toggle_window" ? "<home>"
                 : "";
             const QString display = editable
@@ -893,6 +898,7 @@ void MainWindow::resetDefaultHotkeys() {
             {"toggle_display", "<f2>"},
             {"toggle_recoil", "<f3>"},
             {"measure_map", "<f4>"},
+            {"mortar_auto_aim", "<f6>"},
             {"marker_prev", "q"},
             {"marker_next", "e"},
             {"toggle_equipment", "tab"},

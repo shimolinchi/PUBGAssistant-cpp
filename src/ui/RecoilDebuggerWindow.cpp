@@ -35,6 +35,22 @@ double paddedYMaxFromZero(const std::vector<double>& values) {
     return std::max(1.0, *max_it + span * 0.1);
 }
 
+double sampleSortedCurve(const std::vector<std::pair<double, double>>& points, double x) {
+    if (points.empty()) return 0.0;
+    if (points.size() == 1 || x <= points.front().first) return points.front().second;
+    if (x >= points.back().first) return points.back().second;
+    for (size_t i = 1; i < points.size(); ++i) {
+        if (x <= points[i].first) {
+            const auto [x0, y0] = points[i - 1];
+            const auto [x1, y1] = points[i];
+            if (std::abs(x1 - x0) < 1e-9) return y1;
+            const double t = (x - x0) / (x1 - x0);
+            return y0 + (y1 - y0) * t;
+        }
+    }
+    return points.back().second;
+}
+
 } // namespace
 
 RecoilDebuggerWindow::RecoilDebuggerWindow(Config& config, RecoilControl& recoil, QWidget* parent)
@@ -229,11 +245,15 @@ void RecoilDebuggerWindow::reloadOptions() {
 
 std::vector<double> RecoilDebuggerWindow::xAxisFor(size_t count) const {
     std::vector<double> xs;
-    const double step = config_.read([](const Json& data) {
-        return data.value("recoil_settings", Json::object()).value("recoil_curve_step", 0.4);
-    });
+    const double step = recoilCurveStep();
     for (size_t i = 0; i < count; ++i) xs.push_back(static_cast<double>(i) * step);
     return xs;
+}
+
+double RecoilDebuggerWindow::recoilCurveStep() const {
+    return config_.read([](const Json& data) {
+        return data.value("recoil_settings", Json::object()).value("recoil_curve_step", 0.4);
+    });
 }
 
 std::string RecoilDebuggerWindow::currentWeaponType(const Json& rc) const {
@@ -247,6 +267,61 @@ std::string RecoilDebuggerWindow::currentWeaponType(const Json& rc) const {
 
 double RecoilDebuggerWindow::currentXAxisMax(const Json& rc) const {
     return currentWeaponType(rc) == "lmg" ? 8.0 : 4.0;
+}
+
+double RecoilDebuggerWindow::activeXAxisMax(const Json& rc) const {
+    const QString type = currentCurveTypeKey(curve_type_combo_);
+    return type == QStringLiteral("weapon") ? currentXAxisMax(rc) : 4.0;
+}
+
+std::vector<double> RecoilDebuggerWindow::fixedGridCurveForSave(const Json& rc) const {
+    if (curve_y_.empty()) {
+        return {1.0};
+    }
+    if (right_panel_ == dmr_panel_) {
+        return {curve_y_.front()};
+    }
+    if (curve_y_.size() == 1 || curve_x_.size() != curve_y_.size()) {
+        return curve_y_;
+    }
+
+    const double step = recoilCurveStep();
+    const double max_x = activeXAxisMax(rc);
+    if (step <= 0.0 || max_x <= 0.0) {
+        return curve_y_;
+    }
+
+    std::vector<std::pair<double, double>> points;
+    points.reserve(curve_y_.size());
+    for (size_t i = 0; i < curve_y_.size(); ++i) {
+        const double x = std::clamp(curve_x_[i], 0.0, max_x);
+        if (!std::isfinite(x) || !std::isfinite(curve_y_[i])) continue;
+        points.push_back({x, curve_y_[i]});
+    }
+    if (points.empty()) {
+        return {1.0};
+    }
+    std::stable_sort(points.begin(), points.end(), [](const auto& a, const auto& b) {
+        return a.first < b.first;
+    });
+
+    std::vector<std::pair<double, double>> unique_points;
+    unique_points.reserve(points.size());
+    for (const auto& point : points) {
+        if (!unique_points.empty() && std::abs(unique_points.back().first - point.first) < 1e-6) {
+            unique_points.back() = point;
+        } else {
+            unique_points.push_back(point);
+        }
+    }
+
+    const int count = std::max(1, static_cast<int>(std::floor(max_x / step + 1e-6)) + 1);
+    std::vector<double> out;
+    out.reserve(static_cast<size_t>(count));
+    for (int i = 0; i < count; ++i) {
+        out.push_back(sampleSortedCurve(unique_points, static_cast<double>(i) * step));
+    }
+    return out;
 }
 
 void RecoilDebuggerWindow::showCurveEditor() {
@@ -328,14 +403,21 @@ void RecoilDebuggerWindow::reloadCurves() {
 
 void RecoilDebuggerWindow::addCurrentPoint() {
     if (right_panel_ != curve_editor_) return;
+    const auto rc = config_.read([](const Json& data) {
+        return data.value("recoil_settings", Json::object());
+    });
+    const double max_x = activeXAxisMax(rc);
+    const double step = recoilCurveStep();
     if (curve_y_.empty()) {
         curve_x_.push_back(0.0);
         curve_y_.push_back(1.0);
     } else {
-        const double step = config_.read([](const Json& data) {
-            return data.value("recoil_settings", Json::object()).value("recoil_curve_step", 0.4);
-        });
-        curve_x_.push_back(curve_x_.back() + step);
+        const double next_x = curve_x_.empty() ? 0.0 : curve_x_.back() + step;
+        if (next_x > max_x + 1e-6) {
+            status_label_->setText(QStringLiteral("已到达当前曲线的时间上限，不能继续向右添加标点。"));
+            return;
+        }
+        curve_x_.push_back(std::min(next_x, max_x));
         curve_y_.push_back(curve_y_.back());
     }
     curve_editor_->setCurves({CurveEditor::Curve{curve_type_combo_->currentText(), QColor("#2563EB"), &curve_x_, &curve_y_}});
@@ -343,12 +425,16 @@ void RecoilDebuggerWindow::addCurrentPoint() {
 }
 
 void RecoilDebuggerWindow::saveAndApply() {
+    const auto rc_snapshot = config_.read([](const Json& data) {
+        return data.value("recoil_settings", Json::object());
+    });
+    const std::vector<double> saved_curve = fixedGridCurveForSave(rc_snapshot);
     config_.write([&](Json& data) {
         auto& rc = data["recoil_settings"];
         if (active_json_key_ == "weapons") {
-            rc["weapons"][active_curve_name_]["recoil_curve"] = curve_y_;
+            rc["weapons"][active_curve_name_]["recoil_curve"] = saved_curve;
         } else if (!active_json_key_.empty()) {
-            rc[active_json_key_][active_curve_name_] = curve_y_;
+            rc[active_json_key_][active_curve_name_] = saved_curve;
         }
     });
     config_.save();

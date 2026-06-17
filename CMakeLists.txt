@@ -35,6 +35,7 @@ add_executable(PUBGAssistant-cpp
     src/ResourcePaths.cpp
     src/LargeMapRadar.cpp
     src/MapPointAssistant.cpp
+    src/MortarAutoAim.cpp
     src/ThrowablesAssistant.cpp
     src/C4Assistant.cpp
     src/ScopeMotionTracker.cpp
@@ -52,6 +53,7 @@ add_executable(PUBGAssistant-cpp
     include/ui/ScaleCalibrationWindow.hpp
     include/ui/RecoilDebuggerWindow.hpp
     include/ui/SpecialWeaponDebuggerWindow.hpp
+    include/MortarAutoAim.hpp
 )
 
 target_include_directories(PUBGAssistant-cpp PRIVATE

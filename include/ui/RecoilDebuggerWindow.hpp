@@ -25,6 +25,9 @@ private:
     void saveAndApply();
     void addCurrentPoint();
     std::vector<double> xAxisFor(size_t count) const;
+    std::vector<double> fixedGridCurveForSave(const Json& rc) const;
+    double recoilCurveStep() const;
+    double activeXAxisMax(const Json& rc) const;
     std::string currentWeaponType(const Json& rc) const;
     double currentXAxisMax(const Json& rc) const;
     void showCurveEditor();

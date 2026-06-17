@@ -242,6 +242,7 @@
         "toggle_display": "<f2>",
         "toggle_recoil": "<f3>",
         "measure_map": "<f4>",
+        "mortar_auto_aim": "<f6>",
         "marker_prev": "q",
         "marker_next": "e",
         "toggle_equipment": "tab",

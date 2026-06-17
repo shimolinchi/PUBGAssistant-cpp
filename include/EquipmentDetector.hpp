@@ -4,6 +4,8 @@
 #include "ScreenCapture.hpp"
 #include "TemplateMatcher.hpp"
 
+#include <cstdint>
+
 namespace pubg {
 
 // 装备栏识别模块，对应 Python 版 modules/equipment_detector.py。
@@ -28,9 +30,9 @@ public:
     // 设置装备栏打开/关闭/确认状态回调，对应 Python on_status_change。
     void setStatusCallback(StatusCallback cb);
 
-    // Tab 按键触发的立即扫描入口。
-    // 对应 Python 版 on_tab_press，用于打开装备栏时马上识别一次。
-    void onTabPress();
+    // “打开装备栏”快捷键触发的确认入口。
+    // 这里只启动确认扫描，不根据内部状态做开关判断。
+    void requestEquipmentConfirmation();
 
     // 请求 worker 线程在下一帧强制扫描一次（鼠标左键松开等外部事件触发）。
     void requestScan();
@@ -49,8 +51,8 @@ private:
     WeaponSlotInfo detectWeapon(ScreenCapture& capture, int slot);
 
     // 识别当前装备栏两个槽位，只用识别到武器名的结果覆盖 current_（空结果不覆盖），
-    // 有更新时回调通知。供 onTabPress 和后台上升沿复用。
-    void scanCurrentEquipment(ScreenCapture& capture);
+    // 有更新时回调通知。供快捷键确认扫描和后台上升沿复用。
+    void scanCurrentEquipment(ScreenCapture& capture, std::uint64_t session_id);
 
     // 后台循环：装备栏可见时持续识别，不可见超过 idle_timeout 后清空。
     void run();
@@ -82,6 +84,7 @@ private:
     std::atomic_bool enabled_{false};
     std::atomic_bool stop_{false};
     std::atomic_bool active_{false};
+    std::atomic_uint64_t session_id_{0};
     // 外部请求强制扫描一次（Tab 打开、鼠标左键松开）。worker 线程消费后清零。
     std::atomic_bool scan_requested_{false};
     std::thread worker_;

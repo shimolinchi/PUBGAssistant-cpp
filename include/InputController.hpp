@@ -23,6 +23,9 @@ public:
     // 松开鼠标左键。
     static void mouseLeftUp();
 
+    // 滚动鼠标滚轮。positive 表示向上，negative 表示向下；notches 是滚动格数。
+    static void mouseWheel(int notches);
+
     // 查询某个虚拟键当前是否处于按下状态。
     static bool isKeyDown(int vk);
 

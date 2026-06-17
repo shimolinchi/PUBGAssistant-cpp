@@ -57,6 +57,21 @@ void InputController::mouseLeftUp() {
 #endif
 }
 
+void InputController::mouseWheel(int notches) {
+#ifdef _WIN32
+    if (notches == 0) {
+        return;
+    }
+    INPUT input{};
+    input.type = INPUT_MOUSE;
+    input.mi.mouseData = static_cast<DWORD>(static_cast<LONG>(notches * WHEEL_DELTA));
+    input.mi.dwFlags = MOUSEEVENTF_WHEEL;
+    SendInput(1, &input, sizeof(INPUT));
+#else
+    (void)notches;
+#endif
+}
+
 bool InputController::isKeyDown(int vk) {
 #ifdef _WIN32
     return (GetAsyncKeyState(vk) & 0x8000) != 0;
@@ -95,6 +110,7 @@ int InputController::parseVirtualKey(const std::string& key) {
     if (k == "delete" || k == "del") return VK_DELETE;
     if (k == "home") return VK_HOME;
     if (k == "tab") return VK_TAB;
+    if (k == "enter" || k == "return") return VK_RETURN;
     if (k == "space") return VK_SPACE;
     if (k == "alt" || k == "alt_l" || k == "alt_r" || k == "menu") return VK_MENU;
     if (k == "ctrl" || k == "control" || k == "ctrl_l" || k == "ctrl_r") return VK_CONTROL;

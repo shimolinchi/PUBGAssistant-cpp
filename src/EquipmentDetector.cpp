@@ -54,6 +54,7 @@ void EquipmentDetector::setEnabled(bool enabled, Callback cb) {
         stop_ = false;
         enabled_ = true;
         active_ = false;
+        ++session_id_;
         scan_requested_ = false;
         {
             std::lock_guard lock(mutex_);
@@ -66,6 +67,7 @@ void EquipmentDetector::setEnabled(bool enabled, Callback cb) {
         stop_ = true;
         enabled_ = false;
         active_ = false;
+        ++session_id_;
         scan_requested_ = false;
         if (worker_.joinable()) {
             worker_.join();
@@ -219,25 +221,13 @@ WeaponSlotInfo EquipmentDetector::detectWeapon(ScreenCapture& capture, int slot)
     return info;
 }
 
-void EquipmentDetector::onTabPress() {
+void EquipmentDetector::requestEquipmentConfirmation() {
     if (!enabled_) {
         return;
     }
 
-    const bool was_active = active_.load();
-    if (was_active) {
-        active_ = false;
-        scan_requested_ = false;
-        {
-            std::lock_guard lock(mutex_);
-            confirming_until_time_ = 0.0;
-            consecutive_no_numbers_ = 0;
-        }
-        emitStatus("closed");
-        return;
-    }
-
     active_ = true;
+    ++session_id_;
     scan_requested_ = true;
     {
         std::lock_guard lock(mutex_);
@@ -265,10 +255,17 @@ void EquipmentDetector::run() {
             std::this_thread::sleep_for(std::chrono::milliseconds(sleepMsForFps(fps_, nowSeconds() - start)));
             continue;
         }
+        const std::uint64_t session_id = session_id_.load();
 
         const bool n1 = detectWeaponNumber(capture, 1);
         const bool n2 = detectWeaponNumber(capture, 2);
-        const bool equipment_open = n1 || n2;
+        if (!active_ || session_id != session_id_.load()) {
+            was_open = false;
+            scan_requested_.store(false);
+            std::this_thread::sleep_for(std::chrono::milliseconds(sleepMsForFps(fps_, nowSeconds() - start)));
+            continue;
+        }
+        const bool equipment_open = n1 && n2;
         const bool forced = scan_requested_.exchange(false);
 
         if (equipment_open) {
@@ -280,9 +277,13 @@ void EquipmentDetector::run() {
                 last_detected_time_ = nowSeconds();
                 consecutive_no_numbers_ = 0;
             }
+            if (!active_ || session_id != session_id_.load()) {
+                was_open = false;
+                continue;
+            }
             emitStatus("opened");
             if (!was_open || forced || confirming_until > start) {
-                scanCurrentEquipment(capture);
+                scanCurrentEquipment(capture, session_id);
             }
         } else {
             double confirming_until = 0.0;
@@ -297,9 +298,12 @@ void EquipmentDetector::run() {
             const double now = nowSeconds();
             if (confirming_until > now) {
                 scan_requested_ = true;
-                emitStatus("confirming");
+                if (active_ && session_id == session_id_.load()) {
+                    emitStatus("confirming");
+                }
             } else if (missing_count >= 4) {
                 active_ = false;
+                ++session_id_;
                 scan_requested_ = false;
                 {
                     std::lock_guard lock(mutex_);
@@ -308,7 +312,9 @@ void EquipmentDetector::run() {
                 }
                 emitStatus("closed");
             } else {
-                emitStatus("confirming");
+                if (active_ && session_id == session_id_.load()) {
+                    emitStatus("confirming");
+                }
             }
         }
         was_open = equipment_open;
@@ -316,9 +322,15 @@ void EquipmentDetector::run() {
     }
 }
 
-void EquipmentDetector::scanCurrentEquipment(ScreenCapture& capture) {
+void EquipmentDetector::scanCurrentEquipment(ScreenCapture& capture, std::uint64_t session_id) {
+    if (!active_ || session_id != session_id_.load()) {
+        return;
+    }
     WeaponSlotInfo slot1 = detectWeapon(capture, 1);
     WeaponSlotInfo slot2 = detectWeapon(capture, 2);
+    if (!active_ || session_id != session_id_.load()) {
+        return;
+    }
     // 只用识别到武器名的槽位覆盖旧结果；空结果（多为装备栏开合过渡帧）保留上次的好数据，
     // 避免“再次按 Tab 关闭时武器/配件凭空消失”。
     bool changed = false;

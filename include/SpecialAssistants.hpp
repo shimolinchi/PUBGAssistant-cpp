@@ -30,6 +30,8 @@ private:
                  std::vector<OverlayCommand>& cmds);
     void drawCrossbow(const DistanceMap& dists, const std::unordered_map<std::string, std::string>& hex,
                       std::vector<OverlayCommand>& cmds);
+    void drawCenterNotice(const std::string& text, const std::string& color_hex,
+                          std::vector<OverlayCommand>& cmds) const;
     [[nodiscard]] std::optional<std::pair<double, double>> detectCrosshairCenter(ScreenCapture& capture) const;
     [[nodiscard]] std::optional<std::pair<double, double>> cachedCrosshairCenter();
     void drawMortar(const DistanceMap& dists, const ElevationMap& elevs,

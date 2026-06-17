@@ -419,13 +419,6 @@
             "auto_fire": false,
             "type": "dmr"
         },
-        "QBU": {
-            "recoil_curve": [
-                14.0
-            ],
-            "auto_fire": false,
-            "type": "dmr"
-        },
         "Dragunov": {
             "recoil_curve": [
                 22.0

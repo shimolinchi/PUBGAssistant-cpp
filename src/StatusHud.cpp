@@ -2,6 +2,7 @@
 
 #include "BuildConfig.hpp"
 
+#include <algorithm>
 #include <sstream>
 
 namespace pubg {
@@ -51,7 +52,19 @@ StatusHud::StatusHud(Config& config, RegionManager& regions) : config_(config), 
     equipment_[1] = {};
     equipment_[2] = {};
     overlay_.create(L"PUBGAssistant Status", regions_.screenWidth(), regions_.screenHeight(), true);
+    message_worker_ = std::thread(&StatusHud::messageLoop, this);
     render();
+}
+
+StatusHud::~StatusHud() {
+    {
+        std::lock_guard lock(message_mutex_);
+        message_stop_ = true;
+    }
+    message_cv_.notify_all();
+    if (message_worker_.joinable()) {
+        message_worker_.join();
+    }
 }
 
 void StatusHud::setSwitches(bool weapon_detection, bool display, bool recoil) {
@@ -118,6 +131,47 @@ void StatusHud::setMarkerIndicatorVisible(bool visible) {
         marker_indicator_visible_ = visible;
     }
     render();
+}
+
+void StatusHud::showTemporaryMessage(const std::string& text, int duration_ms, const std::string& color_hex) {
+    {
+        std::lock_guard lock(mutex_);
+        temporary_message_ = text;
+        temporary_message_color_hex_ = color_hex;
+        ++message_token_;
+    }
+    {
+        std::lock_guard lock(message_mutex_);
+        message_deadline_ = std::chrono::steady_clock::now() + std::chrono::milliseconds(std::max(1, duration_ms));
+    }
+    message_cv_.notify_all();
+    render();
+}
+
+void StatusHud::messageLoop() {
+    std::unique_lock lock(message_mutex_);
+    while (!message_stop_) {
+        if (message_deadline_ == std::chrono::steady_clock::time_point{}) {
+            message_cv_.wait(lock, [this] {
+                return message_stop_ || message_deadline_ != std::chrono::steady_clock::time_point{};
+            });
+            continue;
+        }
+        const auto deadline = message_deadline_;
+        if (message_cv_.wait_until(lock, deadline, [this, deadline] {
+                return message_stop_ || message_deadline_ != deadline;
+            })) {
+            continue;
+        }
+        message_deadline_ = {};
+        lock.unlock();
+        {
+            std::lock_guard state_lock(mutex_);
+            temporary_message_.clear();
+        }
+        render();
+        lock.lock();
+    }
 }
 
 std::string StatusHud::displayWeaponName(const std::string& name) const {
@@ -203,6 +257,20 @@ void StatusHud::render() {
         cmds.push_back({OverlayCommand::Type::Text, base_x, y, 0, 0, 0,
                         "当前: " + displayWeaponName(current_weapon_) + " | 姿势: " + pose,
                         white, 1, font});
+
+        if (!temporary_message_.empty()) {
+            const double box_w = 360.0;
+            const double box_h = 46.0;
+            const double box_x = regions_.screenWidth() / 2.0 - box_w / 2.0;
+            const double box_y = regions_.screenHeight() * 0.8 - box_h;
+            const auto accent = hexToBgr(temporary_message_color_hex_);
+            cmds.push_back({OverlayCommand::Type::RoundedRect, box_x, box_y, box_x + box_w, box_y + box_h,
+                            10.0, "", accent, 0, 18, 89});
+            cmds.push_back({OverlayCommand::Type::RoundedRect, box_x, box_y, box_x + box_w, box_y + box_h,
+                            10.0, "", accent, 2, 18, 204});
+            cmds.push_back({OverlayCommand::Type::TextCenter, box_x, box_y, box_x + box_w, box_y + box_h,
+                            0.0, temporary_message_, hexToBgr("#FFFFFF"), 1, 18, 255});
+        }
     }
     overlay_.setCommands(std::move(cmds));
     overlay_.pumpMessages();

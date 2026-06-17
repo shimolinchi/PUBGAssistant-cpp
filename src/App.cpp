@@ -68,6 +68,15 @@ App::App()
     PUBG_HEAP_PROBE("ctor.afterMapPoints");
     large_map_ = std::make_unique<LargeMapRadar>(config_, *regions_);
     PUBG_HEAP_PROBE("ctor.afterLargeMap");
+    mortar_auto_aim_ = std::make_unique<MortarAutoAim>(config_, *minimap_, *large_map_,
+        [this](const std::string& message, const std::string& marker_color) {
+        if (status_hud_) {
+            const auto hex = config_.markerHex();
+            const auto it = hex.find(marker_color);
+            status_hud_->showTemporaryMessage(message, 1500, it != hex.end() ? it->second : "#FFFFFF");
+        }
+    });
+    PUBG_HEAP_PROBE("ctor.afterMortarAutoAim");
     throwables_ = std::make_unique<ThrowablesAssistant>(config_, *regions_, *minimap_);
     PUBG_HEAP_PROBE("ctor.afterThrowables");
     c4_ = std::make_unique<C4Assistant>(config_, *regions_, *minimap_);
@@ -130,6 +139,10 @@ void App::registerHotkeys() {
     hotkeys_.addHotkey("measure_map", hotkeyCombo("measure_map", "<f4>"), [this] {
         large_map_->toggleMode();
     });
+    hotkeys_.addHotkey("mortar_auto_aim", hotkeyCombo("mortar_auto_aim", "<f6>"), [this] {
+        if (!mortar_auto_aim_) return;
+        mortar_auto_aim_->trigger(currentMarkerColor());
+    });
     hotkeys_.addHotkey("toggle_window", hotkeyCombo("toggle_window", "<home>"), [this] {
         if (main_window_) {
             QMetaObject::invokeMethod(main_window_, [this] { main_window_->toggleWindowVisible(); }, Qt::QueuedConnection);
@@ -145,13 +158,13 @@ void App::registerHotkeys() {
             QMetaObject::invokeMethod(main_window_, [this] { main_window_->switchTab(1); }, Qt::QueuedConnection);
         }
     });
-    hotkeys_.addHotkey("tab", hotkeyCombo("toggle_equipment", "tab"), [this] {
+    hotkeys_.addHotkey("toggle_equipment", hotkeyCombo("toggle_equipment", ""), [this] {
         const bool enabled = [this] {
             std::lock_guard lock(state_mutex_);
             return weapon_detection_enabled_;
         }();
         if (enabled) {
-            equipment_detector_->onTabPress();
+            equipment_detector_->requestEquipmentConfirmation();
         }
     });
     hotkeys_.addHotkey("marker_prev", hotkeyCombo("marker_prev", "q"), [this] { cycleMarkerColor(-1); });
@@ -252,6 +265,7 @@ void App::shutdown() {
     minimap_->setEnabled(false);
     elevation_->setEnabled(false);
     large_map_->setDisplay(false);
+    if (mortar_auto_aim_) mortar_auto_aim_->shutdown();
     throwables_->setEnabled(false);
     c4_->setEnabled(false);
     special_->shutdown();
@@ -265,6 +279,7 @@ void App::shutdown() {
     status_hud_.reset();
     c4_.reset();
     throwables_.reset();
+    mortar_auto_aim_.reset();
     large_map_.reset();
     map_points_.reset();
     special_.reset();
@@ -340,6 +355,10 @@ void App::migrateLegacyDefaultHotkeys() {
         auto& hotkeys = data["hotkeys"];
         if (!hotkeys.contains("toggle_window") || !hotkeys["toggle_window"].is_string()) {
             hotkeys["toggle_window"] = "<home>";
+            changed = true;
+        }
+        if (!hotkeys.contains("mortar_auto_aim") || !hotkeys["mortar_auto_aim"].is_string()) {
+            hotkeys["mortar_auto_aim"] = "<f6>";
             changed = true;
         }
         if (hotkeys.value("fire_key", std::string("end")) == hotkeys.value("toggle_window", std::string("<home>"))) {
@@ -668,7 +687,7 @@ void App::printStatus() const {
 
 int App::run() {
     std::cout << "PUBGAssistant C++ port started.\n";
-    std::cout << "F1 weapon detection, F2 display, F3 recoil, Tab equipment scan.\n";
+    std::cout << "F1 weapon detection, F2 display, F3 recoil, configured equipment scan key.\n";
     PUBG_HEAP_PROBE("run.start");
     syncMarkerColorsFromConfig();
     setWeaponDetectionEnabled(true);

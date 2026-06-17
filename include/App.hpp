@@ -7,6 +7,7 @@
 #include "LargeMapRadar.hpp"
 #include "MapPointAssistant.hpp"
 #include "MinimapRadar.hpp"
+#include "MortarAutoAim.hpp"
 #include "RecoilControl.hpp"
 #include "SpecialAssistants.hpp"
 #include "StatusHud.hpp"
@@ -84,6 +85,7 @@ private:
     std::unique_ptr<SpecialAssistants> special_;
     std::unique_ptr<MapPointAssistant> map_points_;
     std::unique_ptr<LargeMapRadar> large_map_;
+    std::unique_ptr<MortarAutoAim> mortar_auto_aim_;
     std::unique_ptr<ThrowablesAssistant> throwables_;
     std::unique_ptr<C4Assistant> c4_;
     std::unique_ptr<StatusHud> status_hud_;

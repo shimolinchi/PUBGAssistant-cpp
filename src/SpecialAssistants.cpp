@@ -111,8 +111,10 @@ std::optional<std::pair<double, double>> SpecialAssistants::cachedCrosshairCente
     ScreenCapture capture;
     if (auto detected = detectCrosshairCenter(capture)) {
         cached_crosshair_center_ = detected;
+        return cached_crosshair_center_;
     }
-    return cached_crosshair_center_;
+    cached_crosshair_center_.reset();
+    return std::nullopt;
 }
 
 SpecialAssistants::SpecialAssistants(Config& config, RegionManager& regions, MinimapRadar& minimap, ElevationRadar& elevation)
@@ -174,8 +176,13 @@ void SpecialAssistants::drawRocket(const DistanceMap& dists, const std::unordere
 
 void SpecialAssistants::drawVss(const DistanceMap& dists, const std::unordered_map<std::string, std::string>& hex,
                                 std::vector<OverlayCommand>& cmds) {
-    const double cx = regions_.screenWidth() / 2.0;
-    const double cy = regions_.screenHeight() / 2.0;
+    const auto tracked = cachedCrosshairCenter();
+    if (!tracked) {
+        drawCenterNotice("未找到VSS准星", "#E74C3C", cmds);
+        return;
+    }
+    const double cx = tracked->first;
+    const double cy = tracked->second;
     for (const auto& [color, dist] : dists) {
         if (dist < 100.0 || dist > 420.0) {
             continue;
@@ -190,13 +197,15 @@ void SpecialAssistants::drawVss(const DistanceMap& dists, const std::unordered_m
 void SpecialAssistants::drawCrossbow(const DistanceMap& dists, const std::unordered_map<std::string, std::string>& hex,
                                      std::vector<OverlayCommand>& cmds) {
     const auto tracked = cachedCrosshairCenter();
-    const double cx = tracked ? tracked->first : regions_.screenWidth() / 2.0;
-    const double cy = tracked ? tracked->second : regions_.screenHeight() / 2.0;
-    if (tracked) {
-        const auto black = hexToBgr("#000000");
-        cmds.push_back({OverlayCommand::Type::Line, cx - 7, cy - 7, cx + 7, cy + 7, 0, "", black, 2});
-        cmds.push_back({OverlayCommand::Type::Line, cx - 7, cy + 7, cx + 7, cy - 7, 0, "", black, 2});
+    if (!tracked) {
+        drawCenterNotice("未找到十字弩准星", "#E74C3C", cmds);
+        return;
     }
+    const double cx = tracked->first;
+    const double cy = tracked->second;
+    const auto black = hexToBgr("#000000");
+    cmds.push_back({OverlayCommand::Type::Line, cx - 7, cy - 7, cx + 7, cy + 7, 0, "", black, 2});
+    cmds.push_back({OverlayCommand::Type::Line, cx - 7, cy + 7, cx + 7, cy - 7, 0, "", black, 2});
     for (const auto& [color, dist] : dists) {
         if (dist <= 30.0 || dist > 350.0) {
             continue;
@@ -206,6 +215,21 @@ void SpecialAssistants::drawCrossbow(const DistanceMap& dists, const std::unorde
         cmds.push_back({OverlayCommand::Type::Line, cx - 28, y, cx + 28, y, 0, "", bgr, 2});
         cmds.push_back({OverlayCommand::Type::Text, cx + 36, y - 10, 0, 0, 0, std::to_string(static_cast<int>(std::round(dist))) + "m", bgr, 1, 16});
     }
+}
+
+void SpecialAssistants::drawCenterNotice(const std::string& text, const std::string& color_hex,
+                                         std::vector<OverlayCommand>& cmds) const {
+    const double box_w = 300.0;
+    const double box_h = 42.0;
+    const double box_x = regions_.screenWidth() / 2.0 - box_w / 2.0;
+    const double box_y = regions_.screenHeight() * 0.8 - box_h;
+    const auto bgr = hexToBgr(color_hex);
+    cmds.push_back({OverlayCommand::Type::RoundedRect, box_x, box_y, box_x + box_w, box_y + box_h,
+                    10, "", bgr, 0, 18, 89});
+    cmds.push_back({OverlayCommand::Type::RoundedRect, box_x, box_y, box_x + box_w, box_y + box_h,
+                    10, "", bgr, 2, 18, 204});
+    cmds.push_back({OverlayCommand::Type::TextCenter, box_x, box_y, box_x + box_w, box_y + box_h,
+                    0, text, hexToBgr("#FFFFFF"), 1, 18, 255});
 }
 
 void SpecialAssistants::drawMortar(const DistanceMap& dists, const ElevationMap& elevs,
