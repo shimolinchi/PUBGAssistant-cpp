@@ -430,6 +430,19 @@ void MainWindow::buildCalibrationTab(QWidget* tab) {
         b->setGeometry(2 + col * 87 + (col == 2 ? 1 : 0), 41 + (row - 1) * 37, 82, 33);
         connect(b, &QPushButton::clicked, this, [this, key, scale, square_keys] {
             auto* ov = new RegionCalibrationOverlay(regions_, key, scale ? RegionCalibrationOverlay::Mode::Scale : RegionCalibrationOverlay::Mode::Region, square_keys.contains(key));
+            if (debug_overlay_.created()) {
+                debug_overlay_.clear();
+                debug_overlay_.show(false);
+            }
+            connect(ov, &RegionCalibrationOverlay::calibrationClosed, this, [this](bool changed) {
+                if (debug_overlay_enabled_) {
+                    if (!debug_overlay_.created()) {
+                        debug_overlay_.create(L"PUBGAssistant DebugRegions", regions_.screenWidth(), regions_.screenHeight(), true);
+                    }
+                    debug_overlay_.show(true);
+                    if (changed) drawDebugOverlay();
+                }
+            });
             ov->show();
         });
     };
@@ -637,13 +650,30 @@ void MainWindow::drawDebugOverlay() {
     for (const auto& region_name : region_names) {
             const auto rect = regions_.getRealRegion(region_name);
             if (!rect) continue;
-            const cv::Scalar color = region_name.find("scope_top_edge") != std::string::npos ? cv::Scalar(178, 209, 0)
-                : region_name.find("weapon") != std::string::npos ? cv::Scalar(60, 80, 230)
-                : region_name.find("mini") != std::string::npos ? cv::Scalar(220, 150, 40)
-                : cv::Scalar(255, 255, 255);
+            cv::Scalar color = cv::Scalar(255, 255, 255);
+            if (region_name.find("weapon") != std::string::npos) {
+                if (region_name.find("number") != std::string::npos) color = cv::Scalar(255, 107, 53);
+                else if (region_name.find("name") != std::string::npos) color = cv::Scalar(255, 159, 28);
+                else if (region_name.find("scope") != std::string::npos || region_name.find("grip") != std::string::npos ||
+                         region_name.find("muzzle") != std::string::npos || region_name.find("stock") != std::string::npos) {
+                    color = cv::Scalar(247, 37, 133);
+                } else {
+                    color = cv::Scalar(114, 9, 183);
+                }
+            } else if (region_name.find("mini") != std::string::npos) {
+                color = cv::Scalar(0, 180, 216);
+            } else if (region_name.find("large") != std::string::npos) {
+                color = cv::Scalar(0, 119, 182);
+            } else if (region_name.find("stance") != std::string::npos) {
+                color = cv::Scalar(46, 196, 182);
+            } else if (region_name.find("elevation") != std::string::npos) {
+                color = cv::Scalar(131, 56, 236);
+            } else if (region_name.find("crosshair") != std::string::npos || region_name.find("scope_top_edge") != std::string::npos) {
+                color = cv::Scalar(255, 0, 110);
+            }
             cmds.push_back({OverlayCommand::Type::Rect, static_cast<double>(rect->left), static_cast<double>(rect->top),
                             static_cast<double>(rect->left + rect->width), static_cast<double>(rect->top + rect->height),
-                            0, "", color, 2});
+                            0, "", color, 1});
             cmds.push_back({OverlayCommand::Type::Text, static_cast<double>(rect->left + 5), static_cast<double>(std::max(5, rect->top - 16)),
                             0, 0, 0, region_name, color, 1, 13});
     }

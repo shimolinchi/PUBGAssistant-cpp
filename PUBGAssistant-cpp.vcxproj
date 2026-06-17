@@ -15,7 +15,7 @@
     <VCProjectVersion>18.0</VCProjectVersion>
     <Keyword>MakeFileProj</Keyword>
     <ProjectGuid>{db1bede9-c53c-4903-b436-9095d018ae6e}</ProjectGuid>
-    <RootNamespace>PUBGAssistantCpp</RootNamespace>
+    <RootNamespace>PUBGAssistant-cpp</RootNamespace>
     <ProjectName>PUBGAssistant-cpp</ProjectName>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
@@ -58,8 +58,8 @@
     <NMakeBuildCommandLine>"$(CMakeExe)" --preset windows-x64-debug &amp;&amp; "$(CMakeExe)" --build --preset windows-x64-debug</NMakeBuildCommandLine>
     <NMakeReBuildCommandLine>if exist "$(ProjectDirNormalized).build\debug\CMakeCache.txt" del /f /q "$(ProjectDirNormalized).build\debug\CMakeCache.txt" &amp; if exist "$(ProjectDirNormalized).build\debug\CMakeFiles" rmdir /s /q "$(ProjectDirNormalized).build\debug\CMakeFiles" &amp; "$(CMakeExe)" --preset windows-x64-debug &amp;&amp; "$(CMakeExe)" --build --preset windows-x64-debug --clean-first</NMakeReBuildCommandLine>
     <NMakeCleanCommandLine>"$(CMakeExe)" --build --preset windows-x64-debug --target clean</NMakeCleanCommandLine>
-    <NMakeOutput>$(ProjectDirNormalized).build\debug\PUBGAssistantCpp.exe</NMakeOutput>
-    <LocalDebuggerCommand>$(ProjectDirNormalized).build\debug\PUBGAssistantCpp.exe</LocalDebuggerCommand>
+    <NMakeOutput>$(ProjectDirNormalized).build\debug\PUBGAssistant-cpp.exe</NMakeOutput>
+    <LocalDebuggerCommand>$(ProjectDirNormalized).build\debug\PUBGAssistant-cpp.exe</LocalDebuggerCommand>
     <LocalDebuggerWorkingDirectory>$(ProjectDirNormalized)</LocalDebuggerWorkingDirectory>
     <LocalDebuggerCommandArguments></LocalDebuggerCommandArguments>
     <OutDir>$(ProjectDirNormalized).build\debug\</OutDir>
@@ -70,8 +70,8 @@
     <NMakeBuildCommandLine>"$(CMakeExe)" --preset windows-x64-release &amp;&amp; "$(CMakeExe)" --build --preset windows-x64-release</NMakeBuildCommandLine>
     <NMakeReBuildCommandLine>if exist "$(ProjectDirNormalized).build\release\CMakeCache.txt" del /f /q "$(ProjectDirNormalized).build\release\CMakeCache.txt" &amp; if exist "$(ProjectDirNormalized).build\release\CMakeFiles" rmdir /s /q "$(ProjectDirNormalized).build\release\CMakeFiles" &amp; "$(CMakeExe)" --preset windows-x64-release &amp;&amp; "$(CMakeExe)" --build --preset windows-x64-release --clean-first</NMakeReBuildCommandLine>
     <NMakeCleanCommandLine>"$(CMakeExe)" --build --preset windows-x64-release --target clean</NMakeCleanCommandLine>
-    <NMakeOutput>$(ProjectDirNormalized).build\release\PUBGAssistantCpp.exe</NMakeOutput>
-    <LocalDebuggerCommand>$(ProjectDirNormalized).build\release\PUBGAssistantCpp.exe</LocalDebuggerCommand>
+    <NMakeOutput>$(ProjectDirNormalized).build\release\PUBGAssistant-cpp.exe</NMakeOutput>
+    <LocalDebuggerCommand>$(ProjectDirNormalized).build\release\PUBGAssistant-cpp.exe</LocalDebuggerCommand>
     <LocalDebuggerWorkingDirectory>$(ProjectDirNormalized)</LocalDebuggerWorkingDirectory>
     <LocalDebuggerCommandArguments></LocalDebuggerCommandArguments>
     <OutDir>$(ProjectDirNormalized).build\release\</OutDir>

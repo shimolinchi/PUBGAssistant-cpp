@@ -1,12 +1,50 @@
 #include "ui/SpecialWeaponDebuggerWindow.hpp"
 
 #include <QFormLayout>
+#include <QGridLayout>
 #include <QHBoxLayout>
 #include <QLineEdit>
 #include <QPushButton>
 #include <QVBoxLayout>
 
+#include <algorithm>
+#include <limits>
+
 namespace pubg::ui {
+
+namespace {
+
+std::pair<double, double> paddedYRange(const std::vector<double>& ys) {
+    if (ys.empty()) return {0.0, 1.0};
+    const auto [min_it, max_it] = std::minmax_element(ys.begin(), ys.end());
+    const double span = std::max(1.0, *max_it - *min_it);
+    return {*min_it - span * 0.1, *max_it + span * 0.1};
+}
+
+std::pair<double, double> paddedYRange(const std::vector<double>& ys, const std::vector<double>& ys2) {
+    double min_y = std::numeric_limits<double>::max();
+    double max_y = std::numeric_limits<double>::lowest();
+    bool has_value = false;
+    for (double value : ys) {
+        min_y = std::min(min_y, value);
+        max_y = std::max(max_y, value);
+        has_value = true;
+    }
+    for (double value : ys2) {
+        min_y = std::min(min_y, value);
+        max_y = std::max(max_y, value);
+        has_value = true;
+    }
+    if (!has_value) return {0.0, 1.0};
+    const double span = std::max(1.0, max_y - min_y);
+    return {min_y - span * 0.1, max_y + span * 0.1};
+}
+
+std::pair<double, double> throwableXRange(bool jump) {
+    return jump ? std::pair<double, double>{50.0, 70.0} : std::pair<double, double>{20.0, 50.0};
+}
+
+} // namespace
 
 SpecialWeaponDebuggerWindow::SpecialWeaponDebuggerWindow(Config& config, QWidget* parent)
     : QWidget(parent), config_(config) {
@@ -50,10 +88,22 @@ void SpecialWeaponDebuggerWindow::buildUi() {
     throw_mode_combo_->addItems({QStringLiteral("普通投掷"), QStringLiteral("跳投")});
     ll->addWidget(throw_mode_combo_);
 
+    auto* button_grid = new QGridLayout();
+    button_grid->setHorizontalSpacing(8);
+    button_grid->setVerticalSpacing(8);
     auto* add = new QPushButton(QStringLiteral("添加标点"), this);
-    ll->addWidget(add);
+    auto* sub01 = new QPushButton(QStringLiteral("-0.1"), this);
+    auto* sub001 = new QPushButton(QStringLiteral("-0.01"), this);
+    auto* add001 = new QPushButton(QStringLiteral("+0.01"), this);
+    auto* add01 = new QPushButton(QStringLiteral("+0.1"), this);
     auto* save = new QPushButton(QStringLiteral("保存并应用"), this);
-    ll->addWidget(save);
+    button_grid->addWidget(sub01, 0, 0);
+    button_grid->addWidget(sub001, 0, 1);
+    button_grid->addWidget(add, 0, 2);
+    button_grid->addWidget(add001, 1, 0);
+    button_grid->addWidget(add01, 1, 1);
+    button_grid->addWidget(save, 1, 2);
+    ll->addLayout(button_grid);
 
     status_label_ = new QLabel(QStringLiteral("就绪"), this);
     status_label_->setWordWrap(true);
@@ -61,7 +111,7 @@ void SpecialWeaponDebuggerWindow::buildUi() {
     ll->addWidget(status_label_);
     ll->addStretch();
 
-    auto* hint = new QLabel(QStringLiteral("操作提示\n- 拖拽控制点：修改数值\n- 左键双击空白：新增控制点\n- 右键双击控制点：删除\n- 曲线型武器横轴为距离(m)"), this);
+    auto* hint = new QLabel(QStringLiteral("操作提示\n- 拖拽控制点：修改数值\n- Ctrl + 点击：多选控制点\n- Ctrl + Z：撤回上一次拖动\n- 按住 X/Y：锁定对应轴\n- 左键双击空白：新增控制点\n- 右键双击控制点：删除"), this);
     hint->setWordWrap(true);
     hint->setStyleSheet("color:#111827;font-size:12px;background:#F8FAFC;border:1px solid #D1D5DB;border-radius:6px;padding:8px;");
     ll->addWidget(hint);
@@ -75,6 +125,10 @@ void SpecialWeaponDebuggerWindow::buildUi() {
     connect(weapon_combo_, &QComboBox::currentTextChanged, this, [this] { renderCurrentWeapon(); });
     connect(throw_mode_combo_, &QComboBox::currentTextChanged, this, [this] { renderCurrentWeapon(); });
     connect(add, &QPushButton::clicked, this, &SpecialWeaponDebuggerWindow::addPoint);
+    connect(sub01, &QPushButton::clicked, this, [this] { curve_editor_->nudgeSelectedY(-0.1); });
+    connect(sub001, &QPushButton::clicked, this, [this] { curve_editor_->nudgeSelectedY(-0.01); });
+    connect(add001, &QPushButton::clicked, this, [this] { curve_editor_->nudgeSelectedY(0.01); });
+    connect(add01, &QPushButton::clicked, this, [this] { curve_editor_->nudgeSelectedY(0.1); });
     connect(save, &QPushButton::clicked, this, &SpecialWeaponDebuggerWindow::saveAndApply);
     connect(curve_editor_, &CurveEditor::curveChanged, this, [this] {
         status_label_->setText(QStringLiteral("曲线已修改，点击保存并应用。"));
@@ -115,6 +169,13 @@ void SpecialWeaponDebuggerWindow::bindCurve(const std::string& config_key, const
     });
     if (cfg.contains(x_key)) for (const auto& v : cfg[x_key]) xs_.push_back(v.get<double>());
     if (cfg.contains(y_key)) for (const auto& v : cfg[y_key]) ys_.push_back(v.get<double>());
+    const double max_x = xs_.empty() ? 100.0 : std::max(100.0, *std::max_element(xs_.begin(), xs_.end()));
+    const auto [min_y, max_y] = paddedYRange(ys_);
+    curve_editor_->setAxisLabels(QStringLiteral("下坠比例"));
+    curve_editor_->setFixedXRange(0.0, max_x);
+    curve_editor_->setFixedYRange(min_y, max_y);
+    curve_editor_->clearSelection();
+    curve_editor_->clearUndoHistory();
     curve_editor_->setCurves({CurveEditor::Curve{label, color, &xs_, &ys_}});
 }
 
@@ -132,9 +193,18 @@ void SpecialWeaponDebuggerWindow::bindThrowables(bool jump) {
     if (cfg.contains(active_x_)) for (const auto& v : cfg[active_x_]) xs_.push_back(v.get<double>());
     if (cfg.contains(active_y_)) for (const auto& v : cfg[active_y_]) ys_.push_back(v.get<double>());
     if (cfg.contains(active_y2_)) for (const auto& v : cfg[active_y2_]) ys2_.push_back(v.get<double>());
+    const auto [min_x, max_x] = throwableXRange(jump);
+    const auto [min_y, max_y] = paddedYRange(ys_);
+    const auto [right_min_y, right_max_y] = paddedYRange(ys2_);
+    curve_editor_->setAxisLabels(QStringLiteral("准星抬高高度"), QStringLiteral("瞬爆时间"));
+    curve_editor_->setFixedXRange(min_x, max_x);
+    curve_editor_->setFixedYRange(min_y, max_y);
+    curve_editor_->setFixedRightYRange(right_min_y, right_max_y);
+    curve_editor_->clearSelection();
+    curve_editor_->clearUndoHistory();
     curve_editor_->setCurves({
         CurveEditor::Curve{QStringLiteral("抬高高度"), QColor("#7C3AED"), &xs_, &ys_},
-        CurveEditor::Curve{QStringLiteral("爆炸时间"), QColor("#EA580C"), &xs_, &ys2_},
+        CurveEditor::Curve{QStringLiteral("瞬爆时间"), QColor("#EA580C"), &xs_, &ys2_, CurveEditor::AxisSide::Right},
     });
 }
 
@@ -161,21 +231,26 @@ void SpecialWeaponDebuggerWindow::bindParams(const std::string& config_key, cons
 
 void SpecialWeaponDebuggerWindow::addPoint() {
     if (right_panel_ != curve_editor_) return;
+    const bool is_throwable = !active_y2_.empty();
+    const auto [throw_min_x, throw_max_x] = throwableXRange(throw_mode_combo_->currentText() == QStringLiteral("跳投"));
     if (xs_.empty()) {
-        xs_.push_back(50.0);
+        xs_.push_back(is_throwable ? throw_min_x : 50.0);
         ys_.push_back(0.5);
-        if (!active_y2_.empty()) ys2_.push_back(1.0);
+        if (is_throwable) ys2_.push_back(1.0);
     } else {
-        xs_.push_back(xs_.back() + 5.0);
+        xs_.push_back(is_throwable ? std::clamp(xs_.back() + 2.0, throw_min_x, throw_max_x) : xs_.back() + 5.0);
         ys_.push_back(ys_.empty() ? 0.5 : ys_.back());
-        if (!active_y2_.empty()) ys2_.push_back(ys2_.empty() ? 1.0 : ys2_.back());
+        if (is_throwable) ys2_.push_back(ys2_.empty() ? 1.0 : ys2_.back());
     }
     if (!active_y2_.empty()) {
+        curve_editor_->setFixedXRange(throw_min_x, throw_max_x);
         curve_editor_->setCurves({
             CurveEditor::Curve{QStringLiteral("抬高高度"), QColor("#7C3AED"), &xs_, &ys_},
-            CurveEditor::Curve{QStringLiteral("爆炸时间"), QColor("#EA580C"), &xs_, &ys2_},
+            CurveEditor::Curve{QStringLiteral("瞬爆时间"), QColor("#EA580C"), &xs_, &ys2_, CurveEditor::AxisSide::Right},
         });
     } else {
+        const double max_x = xs_.empty() ? 100.0 : std::max(100.0, *std::max_element(xs_.begin(), xs_.end()));
+        curve_editor_->setFixedXRange(0.0, max_x);
         curve_editor_->setCurves({CurveEditor::Curve{active_label_, active_color_, &xs_, &ys_}});
     }
 }
@@ -193,6 +268,8 @@ void SpecialWeaponDebuggerWindow::saveAndApply() {
         }
     });
     config_.save();
+    curve_editor_->clearUndoHistory();
+    renderCurrentWeapon();
     status_label_->setText(QStringLiteral("参数已保存、重载并应用。"));
 }
 

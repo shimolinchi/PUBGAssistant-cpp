@@ -33,7 +33,7 @@ This project is intended to be opened as a CMake folder in Visual Studio:
 2. Choose `File > Open > Folder...`.
 3. Select this project folder.
 4. Select the `Windows x64 Debug` CMake preset.
-5. Build and run the `PUBGAssistantCpp` target.
+5. Build and run the `PUBGAssistant-cpp` target.
 
 Do not use the initial `.slnx/.vcxproj` as the primary entry point yet. It was
 created before the source tree and does not describe the Qt/CMake build. Opening

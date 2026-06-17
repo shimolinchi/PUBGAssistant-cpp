@@ -22,6 +22,9 @@
         "TEMP": "C:/Projects/PUBGAssistant-cpp/.tmp",
         "TMP": "C:/Projects/PUBGAssistant-cpp/.tmp",
         "VCPKG_DOWNLOADS": "C:/Projects/PUBGAssistant-cpp/.vcpkg-downloads",
+        "VCPKG_BINARY_SOURCES": "clear;files,C:/Projects/PUBGAssistant-cpp/.vcpkg-binary-cache,readwrite",
+        "VCPKG_REGISTRIES_CACHE": "C:/Projects/PUBGAssistant-cpp/.vcpkg-registries",
+        "X_VCPKG_REGISTRIES_CACHE": "C:/Projects/PUBGAssistant-cpp/.vcpkg-registries",
         "HTTP_PROXY": "http://127.0.0.1:7890",
         "HTTPS_PROXY": "http://127.0.0.1:7890"
       },

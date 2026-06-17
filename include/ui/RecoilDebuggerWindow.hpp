@@ -3,6 +3,7 @@
 #include <QComboBox>
 #include <QLabel>
 #include <QPushButton>
+#include <QSlider>
 #include <QWidget>
 
 #include "RecoilControl.hpp"
@@ -24,6 +25,10 @@ private:
     void saveAndApply();
     void addCurrentPoint();
     std::vector<double> xAxisFor(size_t count) const;
+    std::string currentWeaponType(const Json& rc) const;
+    double currentXAxisMax(const Json& rc) const;
+    void showCurveEditor();
+    void showDmrSlider();
 
     Config& config_;
     RecoilControl& recoil_;
@@ -34,7 +39,11 @@ private:
     QComboBox* stock_combo_ = nullptr;
     QComboBox* curve_type_combo_ = nullptr;
     QLabel* status_label_ = nullptr;
+    QWidget* right_panel_ = nullptr;
     CurveEditor* curve_editor_ = nullptr;
+    QWidget* dmr_panel_ = nullptr;
+    QSlider* dmr_slider_ = nullptr;
+    QLabel* dmr_value_label_ = nullptr;
     std::vector<double> curve_x_;
     std::vector<double> curve_y_;
     std::string active_json_key_;

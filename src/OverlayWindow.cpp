@@ -69,7 +69,7 @@ bool OverlayWindow::create(const std::wstring& title, int width, int height, boo
     height_ = height;
 #ifdef _WIN32
     ensureGdiplus();
-    const wchar_t* cls = L"PUBGAssistantCppOverlay";
+    const wchar_t* cls = L"PUBGAssistant-cppOverlay";
     static bool registered = false;
     if (!registered) {
         WNDCLASSW wc{};

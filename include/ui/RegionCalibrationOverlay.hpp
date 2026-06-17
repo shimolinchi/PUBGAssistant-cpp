@@ -16,6 +16,9 @@ public:
 
     RegionCalibrationOverlay(RegionManager& regions, QString target_name, Mode mode, bool force_square, QWidget* parent = nullptr);
 
+signals:
+    void calibrationClosed(bool changed);
+
 protected:
     void paintEvent(QPaintEvent* event) override;
     void mousePressEvent(QMouseEvent* event) override;

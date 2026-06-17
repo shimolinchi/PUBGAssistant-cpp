@@ -5,6 +5,8 @@ build/
 .build/
 .tmp/
 .vcpkg-downloads/
+.vcpkg-binary-cache/
+.vcpkg-registries/
 x64/
 Win32/
 Debug/

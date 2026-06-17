@@ -28,7 +28,8 @@ RegionCalibrationOverlay::RegionCalibrationOverlay(RegionManager& regions, QStri
 void RegionCalibrationOverlay::paintEvent(QPaintEvent*) {
     QPainter p(this);
     p.fillRect(rect(), QColor(0, 0, 0, 3));
-    p.setPen(QPen(mode_ == Mode::Scale ? QColor("#2ECC71") : QColor("#E74C3C"), 3));
+    p.setRenderHint(QPainter::Antialiasing, false);
+    p.setPen(QPen(mode_ == Mode::Scale ? QColor("#10B981") : QColor("#2563EB"), 1));
     if (!dragging_ && start_.isNull() && current_.isNull()) return;
     if (mode_ == Mode::Scale) {
         p.drawLine(start_, current_);
@@ -43,19 +44,34 @@ void RegionCalibrationOverlay::paintEvent(QPaintEvent*) {
 }
 
 void RegionCalibrationOverlay::mousePressEvent(QMouseEvent* event) {
+    if (event->button() == Qt::RightButton) {
+        emit calibrationClosed(false);
+        close();
+        deleteLater();
+        return;
+    }
+    if (event->button() != Qt::LeftButton) return;
     dragging_ = true;
     start_ = current_ = event->pos();
     update();
 }
 
 void RegionCalibrationOverlay::mouseMoveEvent(QMouseEvent* event) {
+    if (!dragging_) return;
     current_ = event->pos();
     update();
 }
 
 void RegionCalibrationOverlay::mouseReleaseEvent(QMouseEvent* event) {
+    if (event->button() != Qt::LeftButton || !dragging_) return;
     current_ = event->pos();
     dragging_ = false;
+    if ((current_ - start_).manhattanLength() < 3) {
+        emit calibrationClosed(false);
+        close();
+        deleteLater();
+        return;
+    }
     if (mode_ == Mode::Scale) {
         const QPoint physical_start = toPhysical(start_);
         const QPoint physical_current = toPhysical(current_);
@@ -80,12 +96,14 @@ void RegionCalibrationOverlay::mouseReleaseEvent(QMouseEvent* event) {
             physical_rect.height() + 1
         });
     }
+    emit calibrationClosed(true);
     close();
     deleteLater();
 }
 
 void RegionCalibrationOverlay::keyPressEvent(QKeyEvent* event) {
     if (event->key() == Qt::Key_Escape) {
+        emit calibrationClosed(false);
         close();
         deleteLater();
     }

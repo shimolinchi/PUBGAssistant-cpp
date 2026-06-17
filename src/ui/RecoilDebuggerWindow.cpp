@@ -1,9 +1,14 @@
 #include "ui/RecoilDebuggerWindow.hpp"
 
 #include <QFormLayout>
+#include <QGridLayout>
 #include <QHBoxLayout>
 #include <QPushButton>
+#include <QSlider>
 #include <QVBoxLayout>
+
+#include <algorithm>
+#include <cmath>
 
 namespace pubg::ui {
 
@@ -21,6 +26,13 @@ std::string currentKey(QComboBox* combo) {
 QString currentCurveTypeKey(QComboBox* combo) {
     const auto data = combo->currentData();
     return data.isValid() ? data.toString() : combo->currentText();
+}
+
+double paddedYMaxFromZero(const std::vector<double>& values) {
+    if (values.empty()) return 1.0;
+    const auto [min_it, max_it] = std::minmax_element(values.begin(), values.end());
+    const double span = std::max(1.0, *max_it - std::min(0.0, *min_it));
+    return std::max(1.0, *max_it + span * 0.1);
 }
 
 } // namespace
@@ -86,17 +98,29 @@ void RecoilDebuggerWindow::buildUi() {
     form->addRow(QStringLiteral("枪托"), stock_combo_);
     ll->addLayout(form);
 
+    auto* button_grid = new QGridLayout();
+    button_grid->setHorizontalSpacing(8);
+    button_grid->setVerticalSpacing(8);
     auto* add_point = new QPushButton(QStringLiteral("添加标点"), this);
-    ll->addWidget(add_point);
+    auto* sub01 = new QPushButton(QStringLiteral("-0.1"), this);
+    auto* sub001 = new QPushButton(QStringLiteral("-0.01"), this);
+    auto* add001 = new QPushButton(QStringLiteral("+0.01"), this);
+    auto* add01 = new QPushButton(QStringLiteral("+0.1"), this);
     auto* save = new QPushButton(QStringLiteral("保存并应用"), this);
-    ll->addWidget(save);
+    button_grid->addWidget(sub01, 0, 0);
+    button_grid->addWidget(sub001, 0, 1);
+    button_grid->addWidget(add_point, 0, 2);
+    button_grid->addWidget(add001, 1, 0);
+    button_grid->addWidget(add01, 1, 1);
+    button_grid->addWidget(save, 1, 2);
+    ll->addLayout(button_grid);
     status_label_ = new QLabel(QStringLiteral("就绪"), this);
     status_label_->setWordWrap(true);
     status_label_->setStyleSheet("color:#1D4ED8;font-size:12px;font-weight:700;");
     ll->addWidget(status_label_);
     ll->addStretch();
 
-    auto* hint = new QLabel(QStringLiteral("操作提示\n- 拖拽控制点：修改数值\n- 双击空白：新增控制点\n- 右键控制点：删除\n- 横轴为开火时序，纵轴为后坐补偿"), this);
+    auto* hint = new QLabel(QStringLiteral("操作提示\n- 拖拽控制点：修改数值\n- Ctrl + 点击：多选控制点\n- Ctrl + Z：撤回上一次拖动\n- 按住 X/Y：锁定对应轴\n- 双击空白：新增控制点\n- 右键双击控制点：删除"), this);
     hint->setWordWrap(true);
     hint->setStyleSheet("color:#111827;font-size:12px;background:#F8FAFC;border:1px solid #D1D5DB;border-radius:6px;padding:8px;");
     ll->addWidget(hint);
@@ -104,9 +128,41 @@ void RecoilDebuggerWindow::buildUi() {
 
     curve_editor_ = new CurveEditor(this);
     curve_editor_->setStyleSheet("background:#F8FAFC;border:1px solid #E5E7EB;");
-    root->addWidget(curve_editor_, 1);
+    right_panel_ = curve_editor_;
+    root->addWidget(right_panel_, 1);
+
+    dmr_panel_ = new QWidget(this);
+    dmr_panel_->setStyleSheet("background:#F8FAFC;border:1px solid #E5E7EB;");
+    auto* dmr_layout = new QVBoxLayout(dmr_panel_);
+    dmr_layout->setContentsMargins(28, 28, 28, 28);
+    dmr_layout->setSpacing(12);
+    auto* dmr_title = new QLabel(QStringLiteral("射手步枪单点压枪力度"), dmr_panel_);
+    dmr_title->setStyleSheet("font-size:18px;font-weight:700;color:#030712;");
+    dmr_layout->addWidget(dmr_title);
+    auto* dmr_desc = new QLabel(QStringLiteral("射手步枪只在每次左键按下时补偿一次，因此这里使用单个滑块，不绘制时间曲线。"), dmr_panel_);
+    dmr_desc->setWordWrap(true);
+    dmr_desc->setStyleSheet("font-size:13px;color:#374151;");
+    dmr_layout->addWidget(dmr_desc);
+    dmr_value_label_ = new QLabel(dmr_panel_);
+    dmr_value_label_->setStyleSheet("font-size:28px;font-weight:800;color:#111827;");
+    dmr_layout->addWidget(dmr_value_label_);
+    dmr_slider_ = new QSlider(Qt::Horizontal, dmr_panel_);
+    dmr_slider_->setRange(0, 400);
+    dmr_slider_->setStyleSheet(
+        "QSlider::groove:horizontal{height:8px;background:#E5E7EB;border-radius:4px;}"
+        "QSlider::handle:horizontal{width:18px;height:18px;background:#2563EB;border-radius:9px;margin:-6px 0;}"
+        "QSlider::sub-page:horizontal{background:#93C5FD;border-radius:4px;}"
+    );
+    dmr_layout->addWidget(dmr_slider_);
+    dmr_layout->addStretch();
+    dmr_panel_->hide();
+    root->addWidget(dmr_panel_, 1);
 
     connect(add_point, &QPushButton::clicked, this, &RecoilDebuggerWindow::addCurrentPoint);
+    connect(sub01, &QPushButton::clicked, this, [this] { curve_editor_->nudgeSelectedY(-0.1); });
+    connect(sub001, &QPushButton::clicked, this, [this] { curve_editor_->nudgeSelectedY(-0.01); });
+    connect(add001, &QPushButton::clicked, this, [this] { curve_editor_->nudgeSelectedY(0.01); });
+    connect(add01, &QPushButton::clicked, this, [this] { curve_editor_->nudgeSelectedY(0.1); });
     connect(save, &QPushButton::clicked, this, &RecoilDebuggerWindow::saveAndApply);
     connect(weapon_combo_, &QComboBox::currentTextChanged, this, &RecoilDebuggerWindow::reloadCurves);
     connect(curve_type_combo_, &QComboBox::currentIndexChanged, this, &RecoilDebuggerWindow::reloadCurves);
@@ -114,6 +170,12 @@ void RecoilDebuggerWindow::buildUi() {
     connect(grip_combo_, &QComboBox::currentIndexChanged, this, &RecoilDebuggerWindow::reloadCurves);
     connect(muzzle_combo_, &QComboBox::currentIndexChanged, this, &RecoilDebuggerWindow::reloadCurves);
     connect(stock_combo_, &QComboBox::currentIndexChanged, this, &RecoilDebuggerWindow::reloadCurves);
+    connect(dmr_slider_, &QSlider::valueChanged, this, [this](int value) {
+        const double strength = static_cast<double>(value) / 10.0;
+        curve_y_ = {strength};
+        dmr_value_label_->setText(QStringLiteral("%1 px").arg(strength, 0, 'f', 1));
+        status_label_->setText(QStringLiteral("单点力度已修改，点击保存并应用。"));
+    });
     connect(curve_editor_, &CurveEditor::curveChanged, this, [this] {
         status_label_->setText(QStringLiteral("曲线已修改，点击保存并应用。"));
     });
@@ -125,6 +187,7 @@ void RecoilDebuggerWindow::reloadOptions() {
         return data.value("recoil_settings", Json::object()).value("weapons", Json::object());
     });
     for (auto it = weapons.begin(); it != weapons.end(); ++it) {
+        if (it.value().value("type", "ar") == "sr") continue;
         weapon_combo_->addItem(QString::fromStdString(it.key()));
     }
 
@@ -173,6 +236,33 @@ std::vector<double> RecoilDebuggerWindow::xAxisFor(size_t count) const {
     return xs;
 }
 
+std::string RecoilDebuggerWindow::currentWeaponType(const Json& rc) const {
+    const auto weapon = weapon_combo_->currentText().toStdString();
+    const auto weapons = rc.value("weapons", Json::object());
+    if (weapons.contains(weapon)) {
+        return weapons[weapon].value("type", "ar");
+    }
+    return "ar";
+}
+
+double RecoilDebuggerWindow::currentXAxisMax(const Json& rc) const {
+    return currentWeaponType(rc) == "lmg" ? 8.0 : 4.0;
+}
+
+void RecoilDebuggerWindow::showCurveEditor() {
+    if (right_panel_ == curve_editor_) return;
+    right_panel_->hide();
+    right_panel_ = curve_editor_;
+    curve_editor_->show();
+}
+
+void RecoilDebuggerWindow::showDmrSlider() {
+    if (right_panel_ == dmr_panel_) return;
+    right_panel_->hide();
+    right_panel_ = dmr_panel_;
+    dmr_panel_->show();
+}
+
 void RecoilDebuggerWindow::reloadCurves() {
     curve_x_.clear();
     curve_y_.clear();
@@ -182,6 +272,7 @@ void RecoilDebuggerWindow::reloadCurves() {
         return data.value("recoil_settings", Json::object());
     });
     const QString type = currentCurveTypeKey(curve_type_combo_);
+    const std::string weapon_type = currentWeaponType(rc);
     Json curve;
     bool has_curve = false;
     if (type == QStringLiteral("weapon")) {
@@ -217,10 +308,26 @@ void RecoilDebuggerWindow::reloadCurves() {
     }
     if (curve_y_.empty()) curve_y_.push_back(1.0);
     curve_x_ = xAxisFor(curve_y_.size());
-    curve_editor_->setCurves({CurveEditor::Curve{curve_type_combo_->currentText(), QColor("#2563EB"), &curve_x_, &curve_y_}});
+    if (type == QStringLiteral("weapon") && weapon_type == "dmr") {
+        if (curve_y_.size() > 1) curve_y_ = {curve_y_.front()};
+        showDmrSlider();
+        dmr_slider_->blockSignals(true);
+        dmr_slider_->setValue(std::clamp(static_cast<int>(std::lround(curve_y_.front() * 10.0)),
+                                        dmr_slider_->minimum(), dmr_slider_->maximum()));
+        dmr_slider_->blockSignals(false);
+        dmr_value_label_->setText(QStringLiteral("%1 px").arg(curve_y_.front(), 0, 'f', 1));
+    } else {
+        showCurveEditor();
+        curve_editor_->setFixedXRange(0.0, type == QStringLiteral("weapon") ? currentXAxisMax(rc) : 4.0);
+        curve_editor_->setFixedYRange(0.0, paddedYMaxFromZero(curve_y_));
+        curve_editor_->clearSelection();
+        curve_editor_->clearUndoHistory();
+        curve_editor_->setCurves({CurveEditor::Curve{curve_type_combo_->currentText(), QColor("#2563EB"), &curve_x_, &curve_y_}});
+    }
 }
 
 void RecoilDebuggerWindow::addCurrentPoint() {
+    if (right_panel_ != curve_editor_) return;
     if (curve_y_.empty()) {
         curve_x_.push_back(0.0);
         curve_y_.push_back(1.0);
@@ -245,7 +352,9 @@ void RecoilDebuggerWindow::saveAndApply() {
         }
     });
     config_.save();
+    curve_editor_->clearUndoHistory();
     recoil_.reloadConfig();
+    reloadCurves();
     status_label_->setText(QStringLiteral("参数已保存、重载并应用。"));
 }
 

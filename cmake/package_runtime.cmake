@@ -8,7 +8,7 @@ file(REMOVE_RECURSE "${PACKAGE_DIR}")
 file(MAKE_DIRECTORY "${PACKAGE_DIR}")
 file(MAKE_DIRECTORY "${PACKAGE_DIR}/platforms")
 
-file(COPY "${BUILD_DIR}/PUBGAssistantCpp.exe" DESTINATION "${PACKAGE_DIR}")
+file(COPY "${BUILD_DIR}/PUBGAssistant-cpp.exe" DESTINATION "${PACKAGE_DIR}")
 file(COPY "${SOURCE_DIR}/assets" DESTINATION "${PACKAGE_DIR}")
 file(COPY "${SOURCE_DIR}/config" DESTINATION "${PACKAGE_DIR}")
 file(COPY "${SOURCE_DIR}/icon.ico" DESTINATION "${PACKAGE_DIR}")
@@ -100,7 +100,7 @@ endif()
 file(WRITE "${PACKAGE_DIR}/README_RELEASE.txt"
 "PUBGAssistant-cpp release package
 
-Run PUBGAssistantCpp.exe from this folder.
+Run PUBGAssistant-cpp.exe from this folder.
 
 Copy this whole folder to another computer:
   .build/package/release

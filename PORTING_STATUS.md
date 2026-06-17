@@ -92,7 +92,7 @@ implementation but still differ from the Python runtime behavior.
    cmake --build build --config Release
    ```
 
-3. Run `build\Release\PUBGAssistantCpp.exe` from a console.
+3. Run `.build\release\PUBGAssistant-cpp.exe` from a console.
 
 4. Verify in this order:
 
