@@ -23,6 +23,12 @@ public:
     // 松开鼠标左键。
     static void mouseLeftUp();
 
+    // 按下鼠标右键。SG 闪身喷腰射瞄准使用。
+    static void mouseRightDown();
+
+    // 松开鼠标右键。
+    static void mouseRightUp();
+
     // 滚动鼠标滚轮。positive 表示向上，negative 表示向下；notches 是滚动格数。
     static void mouseWheel(int notches);
 

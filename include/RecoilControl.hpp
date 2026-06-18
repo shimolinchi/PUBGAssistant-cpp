@@ -34,6 +34,12 @@ public:
     // 重新读取 recoil_settings。后续做调试窗口时可热重载参数。
     void reloadConfig();
 
+    // 玩家物理按下 Q/E 时更新 SG 闪身喷方向。0=无，1=左，2=右。
+    void setSgPeekDirection(int direction);
+    [[nodiscard]] int sgPeekDirection() const;
+    [[nodiscard]] bool shouldShowSgPeekDirection() const;
+    void hideSgPeekDirection();
+
     // 当前是否处于压枪开火状态。App 用它避免开火中武器识别抖动打断压枪。
     [[nodiscard]] bool isFiring() const;
 
@@ -64,6 +70,7 @@ private:
     ScopeMotionTracker* ensureSrTrackerLocked();
     void stopSrBreathTrackingLocked();
     void applySrBreathControl(ScreenCapture& capture);
+    void triggerSgQuickPeekShot(int direction);
 
     // 外部依赖：读取 recoil_settings 和 hotkeys.fire_key。
     Config& config_;
@@ -104,13 +111,18 @@ private:
     // 当前是否正在左键开火，以及本轮开火开始时间。
     bool firing_ = false;
     double fire_start_ = 0.0;
+    int sg_peek_direction_ = 0;
+    bool sg_peek_visible_ = false;
+    std::atomic_bool sg_action_running_{false};
+    std::thread sg_action_thread_;
     bool sr_breath_enabled_ = false;
     double sr_scope_ready_time_ = 0.0;
     std::unique_ptr<ScopeMotionTracker> sr_tracker_;
     double sr_scope_delay_ = 0.6;
-    double sr_track_interval_ = 0.005;
+    double sr_track_interval_ = 1.0 / 60.0;
     double sr_move_scale_ = 1.0;
     int sr_max_step_ = 12;
+    double sr_max_edge_delta_ = 5.0;
     int sr_miss_limit_ = 3;
     double sr_min_confidence_ = 0.25;
     bool sr_invert_y_ = true;
@@ -121,6 +133,7 @@ private:
     int sr_miss_count_ = 0;
     int sr_edge_hit_streak_ = 0;
     bool sr_scope_active_ = false;
+    bool sr_resume_after_movement_ = false;
     double sr_probe_until_ = 0.0;
     double sr_last_confirmed_edge_time_ = 0.0;
     double sr_last_track_time_ = 0.0;

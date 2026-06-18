@@ -109,6 +109,15 @@ void StatusHud::setStance(const std::string& stance) {
     render();
 }
 
+void StatusHud::setPeekDirection(int direction, bool visible) {
+    {
+        std::lock_guard lock(mutex_);
+        peek_direction_ = direction >= 1 && direction <= 2 ? direction : 0;
+        peek_direction_visible_ = visible;
+    }
+    render();
+}
+
 void StatusHud::setMarkerColor(const std::string& color) {
     {
         std::lock_guard lock(mutex_);
@@ -254,8 +263,13 @@ void StatusHud::render() {
         cmds.push_back({OverlayCommand::Type::Text, base_x, y, 0, 0, 0, "武器2: " + formatWeapon(w2), white, 1, font});
         y += 25.0;
         const std::string pose = current_stance_.empty() ? "未知" : mapped(kStanceNames, current_stance_);
+        const std::string peek = peek_direction_ == 1 ? "左" : (peek_direction_ == 2 ? "右" : "???");
+        std::string current_line = "当前: " + displayWeaponName(current_weapon_) + " | " + pose;
+        if (peek_direction_visible_) {
+            current_line += " | " + peek;
+        }
         cmds.push_back({OverlayCommand::Type::Text, base_x, y, 0, 0, 0,
-                        "当前: " + displayWeaponName(current_weapon_) + " | 姿势: " + pose,
+                        current_line,
                         white, 1, font});
 
         if (!temporary_message_.empty()) {

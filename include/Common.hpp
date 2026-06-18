@@ -40,7 +40,9 @@
 #define VK_CONTROL 0x11
 #define VK_MENU 0x12
 #define VK_LEFT 0x25
+#define VK_UP 0x26
 #define VK_RIGHT 0x27
+#define VK_DOWN 0x28
 #define VK_F1 0x70
 #define VK_F2 0x71
 #define VK_F3 0x72

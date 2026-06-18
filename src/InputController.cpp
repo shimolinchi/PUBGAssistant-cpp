@@ -57,6 +57,24 @@ void InputController::mouseLeftUp() {
 #endif
 }
 
+void InputController::mouseRightDown() {
+#ifdef _WIN32
+    INPUT input{};
+    input.type = INPUT_MOUSE;
+    input.mi.dwFlags = MOUSEEVENTF_RIGHTDOWN;
+    SendInput(1, &input, sizeof(INPUT));
+#endif
+}
+
+void InputController::mouseRightUp() {
+#ifdef _WIN32
+    INPUT input{};
+    input.type = INPUT_MOUSE;
+    input.mi.dwFlags = MOUSEEVENTF_RIGHTUP;
+    SendInput(1, &input, sizeof(INPUT));
+#endif
+}
+
 void InputController::mouseWheel(int notches) {
 #ifdef _WIN32
     if (notches == 0) {
@@ -116,7 +134,9 @@ int InputController::parseVirtualKey(const std::string& key) {
     if (k == "ctrl" || k == "control" || k == "ctrl_l" || k == "ctrl_r") return VK_CONTROL;
     if (k == "shift" || k == "shift_l" || k == "shift_r") return VK_SHIFT;
     if (k == "left") return VK_LEFT;
+    if (k == "up") return VK_UP;
     if (k == "right") return VK_RIGHT;
+    if (k == "down") return VK_DOWN;
     if (k == "mouse_left" || k == "lbutton") return VK_LBUTTON;
     if (k == "mouse_right" || k == "rbutton") return VK_RBUTTON;
     if (k == "mouse_middle" || k == "mbutton") return VK_MBUTTON;

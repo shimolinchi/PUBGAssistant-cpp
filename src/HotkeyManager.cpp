@@ -299,6 +299,9 @@ LRESULT CALLBACK HotkeyManager::lowLevelKeyboardProc(int nCode, WPARAM wParam, L
     HotkeyManager* self = s_active;
     if (nCode == HC_ACTION && self) {
         const auto* kb = reinterpret_cast<const KBDLLHOOKSTRUCT*>(lParam);
+        if (kb && (kb->flags & LLKHF_INJECTED)) {
+            return CallNextHookEx(nullptr, nCode, wParam, lParam);
+        }
         const bool down = (wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN);
         const bool up = (wParam == WM_KEYUP || wParam == WM_SYSKEYUP);
         if (down || up) {

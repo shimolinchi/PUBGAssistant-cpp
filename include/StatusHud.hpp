@@ -30,6 +30,7 @@ public:
     // 当前手持武器和姿势变化时调用。
     void setCurrentWeapon(const std::string& weapon);
     void setStance(const std::string& stance);
+    void setPeekDirection(int direction, bool visible = true);
 
     // 标点颜色和色盲模式变化时调用。
     void setMarkerColor(const std::string& color);
@@ -71,6 +72,8 @@ private:
     std::string equipment_status_ = "closed";
     std::string current_weapon_;
     std::string current_stance_;
+    int peek_direction_ = 0;
+    bool peek_direction_visible_ = false;
     std::string marker_color_ = "Yellow";
     std::unordered_map<std::string, std::string> marker_hex_;
     std::map<int, WeaponSlotInfo> equipment_;

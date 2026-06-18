@@ -1,506 +1,5 @@
 {
-    "recoil_delay": 0.02,
-    "recoil_curve_step": 0.4,
-    "sr_breath_control": {
-        "scope_delay": 0.6,
-        "track_interval": 0.005,
-        "move_scale": 1.0,
-        "max_step": 12,
-        "miss_limit": 3,
-        "min_confidence": 0.25,
-        "invert_y": true,
-        "probe_seconds": 2.0,
-        "scope_lost_seconds": 2.0,
-        "scope_confirm_frames": 3,
-        "edge_tracker": {
-            "black_threshold": 70
-        }
-    },
-    "weapons": {
-        "M416": {
-            "recoil_curve": [
-                9.6,
-                10.76,
-                13.54,
-                15.58,
-                16.61,
-                16.96,
-                16.9,
-                16.59,
-                16.14,
-                15.58,
-                14.96
-            ],
-            "auto_fire": false,
-            "type": "ar"
-        },
-        "AKM": {
-            "recoil_curve": [
-                10.3,
-                11.46,
-                14.24,
-                16.28,
-                17.31,
-                17.66,
-                17.6,
-                17.29,
-                16.84,
-                16.28,
-                15.66
-            ],
-            "auto_fire": false,
-            "type": "ar"
-        },
-        "SCARL": {
-            "recoil_curve": [
-                12.0,
-                13.16,
-                15.94,
-                17.98,
-                19.01,
-                19.36,
-                19.3,
-                18.99,
-                18.54,
-                17.98,
-                17.36
-            ],
-            "auto_fire": false,
-            "type": "ar"
-        },
-        "AUG": {
-            "recoil_curve": [
-                8.9,
-                10.82,
-                14.78,
-                17.58,
-                19.02,
-                19.59,
-                19.67,
-                19.45,
-                19.05,
-                18.53,
-                17.94
-            ],
-            "auto_fire": false,
-            "type": "ar"
-        },
-        "K2": {
-            "recoil_curve": [
-                9.0,
-                10.16,
-                12.94,
-                14.98,
-                16.01,
-                16.36,
-                16.3,
-                15.99,
-                15.54,
-                14.98,
-                14.36
-            ],
-            "auto_fire": false,
-            "type": "ar"
-        },
-        "ACE32": {
-            "recoil_curve": [
-                9.2,
-                10.63,
-                13.74,
-                16.08,
-                17.37,
-                17.96,
-                18.13,
-                18.04,
-                17.79,
-                17.45,
-                17.04
-            ],
-            "auto_fire": false,
-            "type": "ar"
-        },
-        "M762": {
-            "recoil_curve": [
-                12.0,
-                15.062,
-                17.985,
-                20.49,
-                22.219,
-                23.087,
-                22.995,
-                22.458,
-                21.683,
-                20.848,
-                19.845
-            ],
-            "auto_fire": false,
-            "type": "ar"
-        },
-        "Groza": {
-            "recoil_curve": [
-                9.0,
-                10.08,
-                12.78,
-                14.74,
-                15.69,
-                15.96,
-                15.82,
-                15.43,
-                14.9,
-                14.26,
-                13.56
-            ],
-            "auto_fire": false,
-            "type": "ar"
-        },
-        "Famas": {
-            "recoil_curve": [
-                9.0,
-                10.57,
-                13.71,
-                15.73,
-                16.62,
-                16.83,
-                16.67,
-                16.29,
-                15.77,
-                15.17,
-                14.52
-            ],
-            "auto_fire": false,
-            "type": "ar"
-        },
-        "M16A4": {
-            "recoil_curve": [
-                11.0,
-                13.46,
-                17.1,
-                18.88,
-                19.44,
-                19.38,
-                19.01,
-                18.48,
-                17.85,
-                17.15,
-                16.42
-            ],
-            "auto_fire": true,
-            "type": "ar"
-        },
-        "MK47": {
-            "recoil_curve": [
-                10.1,
-                13.222,
-                15.428,
-                17.176,
-                17.817,
-                17.746,
-                17.139,
-                16.143,
-                14.973,
-                13.804,
-                12.634
-            ],
-            "auto_fire": true,
-            "type": "ar"
-        },
-        "Tommy": {
-            "recoil_curve": [
-                7.15,
-                8.37,
-                11.28,
-                13.42,
-                14.5,
-                14.87,
-                14.81,
-                14.48,
-                14.0,
-                13.42,
-                12.77
-            ],
-            "auto_fire": false,
-            "type": "smg"
-        },
-        "UMP": {
-            "recoil_curve": [
-                5.3,
-                7.58,
-                10.32,
-                11.36,
-                11.5,
-                11.25,
-                10.8,
-                10.25,
-                9.65,
-                9.01,
-                8.34
-            ],
-            "auto_fire": false,
-            "type": "smg"
-        },
-        "UZI": {
-            "recoil_curve": [
-                5.0,
-                8.81,
-                15.12,
-                19.15,
-                21.21,
-                22.17,
-                22.53,
-                22.56,
-                22.38,
-                22.09,
-                21.71
-            ],
-            "auto_fire": false,
-            "type": "smg"
-        },
-        "P90": {
-            "recoil_curve": [
-                6.4,
-                8.59,
-                8.39,
-                7.69,
-                6.88,
-                6.05,
-                5.21,
-                4.35,
-                3.5,
-                2.64,
-                1.79
-            ],
-            "auto_fire": false,
-            "type": "smg"
-        },
-        "MP5K": {
-            "recoil_curve": [
-                7.8,
-                9.96,
-                13.54,
-                15.39,
-                15.95,
-                15.84,
-                15.38,
-                14.73,
-                13.97,
-                13.14,
-                12.26
-            ],
-            "auto_fire": false,
-            "type": "smg"
-        },
-        "Vector": {
-            "recoil_curve": [
-                8.5,
-                11.69,
-                16.72,
-                19.5,
-                20.62,
-                20.86,
-                20.64,
-                20.17,
-                19.56,
-                18.86,
-                18.1
-            ],
-            "auto_fire": false,
-            "type": "smg"
-        },
-        "MP9": {
-            "recoil_curve": [
-                7.8,
-                13.2,
-                12.75,
-                9.81,
-                6.29,
-                2.58,
-                -1.2,
-                -5.02,
-                -8.87,
-                -12.72,
-                -16.58
-            ],
-            "auto_fire": false,
-            "type": "smg"
-        },
-        "JS9": {
-            "recoil_curve": [
-                6.3,
-                8.16,
-                11.3,
-                12.88,
-                13.32,
-                13.15,
-                12.68,
-                12.03,
-                11.28,
-                10.47,
-                9.62
-            ],
-            "auto_fire": false,
-            "type": "smg"
-        },
-        "MG3": {
-            "recoil_curve": [
-                4.2,
-                6.5,
-                7.27,
-                7.29,
-                7.12,
-                6.9,
-                6.65,
-                6.39,
-                6.12,
-                5.85,
-                5.57
-            ],
-            "auto_fire": false,
-            "type": "lmg"
-        },
-        "M249": {
-            "recoil_curve": [
-                6.5,
-                8.08,
-                9.15,
-                9.41,
-                9.41,
-                9.31,
-                9.17,
-                9.0,
-                8.82,
-                8.64,
-                8.45
-            ],
-            "auto_fire": false,
-            "type": "lmg"
-        },
-        "O12": {
-            "recoil_curve": [
-                9.0,
-                10.04,
-                12.17,
-                12.34,
-                11.28,
-                9.62,
-                7.67,
-                5.55,
-                3.34,
-                1.07,
-                -1.23
-            ],
-            "auto_fire": false,
-            "type": "ar"
-        },
-        "SLR": {
-            "recoil_curve": [
-                15.0
-            ],
-            "auto_fire": false,
-            "type": "dmr"
-        },
-        "Mini14": {
-            "recoil_curve": [
-                14.0
-            ],
-            "auto_fire": false,
-            "type": "dmr"
-        },
-        "MK12": {
-            "recoil_curve": [
-                14.0
-            ],
-            "auto_fire": false,
-            "type": "dmr"
-        },
-        "MK14": {
-            "recoil_curve": [
-                14.0
-            ],
-            "auto_fire": false,
-            "type": "dmr"
-        },
-        "Dragunov": {
-            "recoil_curve": [
-                22.0
-            ],
-            "auto_fire": false,
-            "type": "dmr"
-        },
-        "SKS": {
-            "recoil_curve": [
-                14.0
-            ],
-            "auto_fire": false,
-            "type": "dmr"
-        },
-        "Kar98k": {
-            "type": "sr"
-        },
-        "AWM": {
-            "type": "sr"
-        },
-        "M24": {
-            "type": "sr"
-        },
-        "LynxAMR": {
-            "type": "sr"
-        },
-        "Win94": {
-            "type": "sr"
-        }
-    },
-    "stance_multipliers": {
-        "ar": {
-            "stand": 1.0,
-            "squat": 0.8,
-            "lie": 0.6
-        },
-        "smg": {
-            "stand": 1.0,
-            "squat": 0.8,
-            "lie": 0.7
-        },
-        "lmg": {
-            "stand": 1.0,
-            "squat": 0.4,
-            "lie": 0.2
-        },
-        "dmr": {
-            "stand": 1.0,
-            "squat": 1.0,
-            "lie": 1.0
-        }
-    },
-    "scope_multipliers": {
-        "hip": [
-            1.0
-        ],
-        "holographic": [
-            1.0
-        ],
-        "red_dot": [
-            1.0
-        ],
-        "2": [
-            1.75
-        ],
-        "3": [
-            2.6
-        ],
-        "4": [
-            3.75
-        ],
-        "6": [
-            5.3
-        ],
-        "8": [
-            7.452
-        ]
-    },
     "grip_multipliers": {
-        "vertical": [
-            0.794
-        ],
         "half": [
             0.873,
             0.871,
@@ -513,6 +12,9 @@
             0.81,
             0.83,
             0.839
+        ],
+        "laser": [
+            1.0
         ],
         "light": [
             1.0
@@ -533,11 +35,24 @@
             0.869,
             0.869
         ],
-        "laser": [
-            1.0
+        "vertical": [
+            0.794
         ]
     },
     "muzzle_multipliers": {
+        "ar_dmr_braker": [
+            0.875,
+            0.873,
+            0.86,
+            0.844,
+            0.821,
+            0.808,
+            0.806,
+            0.815,
+            0.844,
+            0.873,
+            0.896
+        ],
         "ar_dmr_compensator": [
             0.79,
             0.79,
@@ -557,19 +72,6 @@
         "ar_dmr_suppressor": [
             0.9
         ],
-        "ar_dmr_braker": [
-            0.875,
-            0.873,
-            0.86,
-            0.844,
-            0.821,
-            0.808,
-            0.806,
-            0.815,
-            0.844,
-            0.873,
-            0.896
-        ],
         "dmr_sr_compensator": [
             0.824
         ],
@@ -579,28 +81,539 @@
         "dmr_sr_suppressor": [
             0.9
         ],
-        "smg_suppressor": [
-            0.9
-        ],
         "smg_compensator": [
             0.7
         ],
         "smg_silencer": [
             1.0
+        ],
+        "smg_suppressor": [
+            0.9
         ]
     },
+    "recoil_curve_step": 0.4,
+    "recoil_delay": 0.02,
+    "scope_multipliers": {
+        "2": [
+            1.75
+        ],
+        "3": [
+            2.6
+        ],
+        "4": [
+            3.75
+        ],
+        "6": [
+            5.3
+        ],
+        "8": [
+            7.452
+        ],
+        "hip": [
+            1.0
+        ],
+        "holographic": [
+            1.0
+        ],
+        "red_dot": [
+            1.0
+        ]
+    },
+    "sr_breath_control": {
+        "edge_tracker": {
+            "black_threshold": 70
+        },
+        "invert_y": true,
+        "max_edge_delta": 5.0,
+        "max_step": 12,
+        "min_confidence": 0.25,
+        "miss_limit": 3,
+        "move_scale": 1.0,
+        "probe_seconds": 2.0,
+        "scope_confirm_frames": 3,
+        "scope_delay": 0.6,
+        "scope_lost_seconds": 2.0,
+        "track_interval": 0.0166667
+    },
+    "stance_multipliers": {
+        "ar": {
+            "lie": 0.6,
+            "squat": 0.8,
+            "stand": 1.0
+        },
+        "dmr": {
+            "lie": 1.0,
+            "squat": 1.0,
+            "stand": 1.0
+        },
+        "lmg": {
+            "lie": 0.2,
+            "squat": 0.4,
+            "stand": 1.0
+        },
+        "smg": {
+            "lie": 0.7,
+            "squat": 0.8,
+            "stand": 1.0
+        }
+    },
     "stock_multipliers": {
-        "tactical": [
-            0.95
+        "cheek_pad": [
+            0.8
         ],
         "heavy": [
             0.9
         ],
+        "tactical": [
+            0.95
+        ],
         "uzi": [
             0.7
-        ],
-        "cheek_pad": [
-            0.8
         ]
+    },
+    "weapons": {
+        "ACE32": {
+            "auto_fire": false,
+            "recoil_curve": [
+                9.2,
+                10.63,
+                13.74,
+                16.08,
+                17.37,
+                17.96,
+                18.13,
+                18.04,
+                17.79,
+                17.45,
+                17.04
+            ],
+            "type": "ar"
+        },
+        "AKM": {
+            "auto_fire": false,
+            "recoil_curve": [
+                10.3,
+                11.46,
+                14.24,
+                16.28,
+                17.31,
+                17.66,
+                17.6,
+                17.29,
+                16.84,
+                16.28,
+                15.66
+            ],
+            "type": "ar"
+        },
+        "AUG": {
+            "auto_fire": false,
+            "recoil_curve": [
+                8.9,
+                10.82,
+                14.78,
+                17.58,
+                19.02,
+                19.59,
+                19.67,
+                19.45,
+                19.05,
+                18.53,
+                17.94
+            ],
+            "type": "ar"
+        },
+        "AWM": {
+            "type": "sr"
+        },
+        "DBS": {
+            "type": "sg"
+        },
+        "Dragunov": {
+            "auto_fire": false,
+            "recoil_curve": [
+                22.0
+            ],
+            "type": "dmr"
+        },
+        "Famas": {
+            "auto_fire": false,
+            "recoil_curve": [
+                9.0,
+                10.57,
+                13.71,
+                15.73,
+                16.62,
+                16.83,
+                16.67,
+                16.29,
+                15.77,
+                15.17,
+                14.52
+            ],
+            "type": "ar"
+        },
+        "Groza": {
+            "auto_fire": false,
+            "recoil_curve": [
+                9.0,
+                10.08,
+                12.78,
+                14.74,
+                15.69,
+                15.96,
+                15.82,
+                15.43,
+                14.9,
+                14.26,
+                13.56
+            ],
+            "type": "ar"
+        },
+        "JS9": {
+            "auto_fire": false,
+            "recoil_curve": [
+                6.3,
+                8.16,
+                11.3,
+                12.88,
+                13.32,
+                13.15,
+                12.68,
+                12.03,
+                11.28,
+                10.47,
+                9.62
+            ],
+            "type": "smg"
+        },
+        "K2": {
+            "auto_fire": false,
+            "recoil_curve": [
+                9.0,
+                10.16,
+                12.94,
+                14.98,
+                16.01,
+                16.36,
+                16.3,
+                15.99,
+                15.54,
+                14.98,
+                14.36
+            ],
+            "type": "ar"
+        },
+        "Kar98k": {
+            "type": "sr"
+        },
+        "LynxAMR": {
+            "type": "sr"
+        },
+        "M16A4": {
+            "auto_fire": true,
+            "recoil_curve": [
+                11.0,
+                13.46,
+                17.1,
+                18.88,
+                19.44,
+                19.38,
+                19.01,
+                18.48,
+                17.85,
+                17.15,
+                16.42
+            ],
+            "type": "ar"
+        },
+        "M24": {
+            "type": "sr"
+        },
+        "M249": {
+            "auto_fire": false,
+            "recoil_curve": [
+                6.5,
+                8.08,
+                9.15,
+                9.41,
+                9.41,
+                9.31,
+                9.17,
+                9.0,
+                8.82,
+                8.64,
+                8.45
+            ],
+            "type": "lmg"
+        },
+        "M416": {
+            "auto_fire": false,
+            "recoil_curve": [
+                9.6,
+                10.76,
+                13.54,
+                15.58,
+                16.61,
+                16.96,
+                16.9,
+                16.59,
+                16.14,
+                15.58,
+                14.96
+            ],
+            "type": "ar"
+        },
+        "M762": {
+            "auto_fire": false,
+            "recoil_curve": [
+                12.0,
+                15.062,
+                17.985,
+                20.49,
+                22.219,
+                23.087,
+                22.995,
+                22.458,
+                21.683,
+                20.848,
+                19.845
+            ],
+            "type": "ar"
+        },
+        "MG3": {
+            "auto_fire": false,
+            "recoil_curve": [
+                4.2,
+                6.5,
+                7.27,
+                7.29,
+                7.12,
+                6.9,
+                6.65,
+                6.39,
+                6.12,
+                5.85,
+                5.57
+            ],
+            "type": "lmg"
+        },
+        "MK12": {
+            "auto_fire": false,
+            "recoil_curve": [
+                14.0
+            ],
+            "type": "dmr"
+        },
+        "MK14": {
+            "auto_fire": false,
+            "recoil_curve": [
+                14.0
+            ],
+            "type": "dmr"
+        },
+        "MK47": {
+            "auto_fire": true,
+            "recoil_curve": [
+                9.300000000000002,
+                11.61513071302388,
+                14.79793438980066,
+                16.910292835271658,
+                17.023776749835633,
+                16.016999280254932,
+                13.966743156708915,
+                12.246107364527546,
+                11.833502447230492,
+                11.489071765691614,
+                10.980523817139986
+            ],
+            "type": "ar"
+        },
+        "MP5K": {
+            "auto_fire": false,
+            "recoil_curve": [
+                7.8,
+                9.96,
+                13.54,
+                15.39,
+                15.95,
+                15.84,
+                15.38,
+                14.73,
+                13.97,
+                13.14,
+                12.26
+            ],
+            "type": "smg"
+        },
+        "MP9": {
+            "auto_fire": false,
+            "recoil_curve": [
+                7.8,
+                13.2,
+                12.75,
+                9.81,
+                6.29,
+                2.58,
+                -1.2,
+                -5.02,
+                -8.87,
+                -12.72,
+                -16.58
+            ],
+            "type": "smg"
+        },
+        "Mini14": {
+            "auto_fire": false,
+            "recoil_curve": [
+                14.0
+            ],
+            "type": "dmr"
+        },
+        "O12": {
+            "auto_fire": false,
+            "recoil_curve": [
+                9.0,
+                10.04,
+                12.17,
+                12.34,
+                11.28,
+                9.62,
+                7.67,
+                5.55,
+                3.34,
+                1.07,
+                -1.23
+            ],
+            "type": "ar"
+        },
+        "P90": {
+            "auto_fire": false,
+            "recoil_curve": [
+                6.4,
+                8.59,
+                8.39,
+                7.69,
+                6.88,
+                6.05,
+                5.21,
+                4.35,
+                3.5,
+                2.64,
+                1.79
+            ],
+            "type": "smg"
+        },
+        "S12K": {
+            "type": "sg"
+        },
+        "S1897": {
+            "type": "sg"
+        },
+        "S686": {
+            "type": "sg"
+        },
+        "SCARL": {
+            "auto_fire": false,
+            "recoil_curve": [
+                12.0,
+                13.16,
+                15.94,
+                17.98,
+                19.01,
+                19.36,
+                19.3,
+                18.99,
+                18.54,
+                17.98,
+                17.36
+            ],
+            "type": "ar"
+        },
+        "SKS": {
+            "auto_fire": false,
+            "recoil_curve": [
+                14.0
+            ],
+            "type": "dmr"
+        },
+        "SLR": {
+            "auto_fire": false,
+            "recoil_curve": [
+                15.0
+            ],
+            "type": "dmr"
+        },
+        "Tommy": {
+            "auto_fire": false,
+            "recoil_curve": [
+                7.15,
+                8.37,
+                11.28,
+                13.42,
+                14.5,
+                14.87,
+                14.81,
+                14.48,
+                14.0,
+                13.42,
+                12.77
+            ],
+            "type": "smg"
+        },
+        "UMP": {
+            "auto_fire": false,
+            "recoil_curve": [
+                5.3,
+                7.58,
+                10.32,
+                11.36,
+                11.5,
+                11.25,
+                10.8,
+                10.25,
+                9.65,
+                9.01,
+                8.34
+            ],
+            "type": "smg"
+        },
+        "UZI": {
+            "auto_fire": false,
+            "recoil_curve": [
+                5.0,
+                8.81,
+                15.12,
+                19.15,
+                21.21,
+                22.17,
+                22.53,
+                22.56,
+                22.38,
+                22.09,
+                21.71
+            ],
+            "type": "smg"
+        },
+        "Vector": {
+            "auto_fire": false,
+            "recoil_curve": [
+                8.5,
+                11.69,
+                16.72,
+                19.5,
+                20.62,
+                20.86,
+                20.64,
+                20.17,
+                19.56,
+                18.86,
+                18.1
+            ],
+            "type": "smg"
+        },
+        "Win94": {
+            "type": "sr"
+        }
     }
 }

@@ -66,6 +66,10 @@ QString supportedHotkeyFromEvent(QKeyEvent* event) {
     if (event->key() == Qt::Key_Space) return QStringLiteral("<space>");
     if (event->key() == Qt::Key_End) return QStringLiteral("end");
     if (event->key() == Qt::Key_Home) return QStringLiteral("<home>");
+    if (event->key() == Qt::Key_Left) return QStringLiteral("<left>");
+    if (event->key() == Qt::Key_Up) return QStringLiteral("<up>");
+    if (event->key() == Qt::Key_Right) return QStringLiteral("<right>");
+    if (event->key() == Qt::Key_Down) return QStringLiteral("<down>");
     return {};
 }
 
@@ -99,6 +103,10 @@ QString supportedHotkeyFromWindowsMessage(const MSG* msg) {
     if (vk == VK_SPACE) return QStringLiteral("<space>");
     if (vk == VK_END) return QStringLiteral("end");
     if (vk == VK_HOME) return QStringLiteral("<home>");
+    if (vk == VK_LEFT) return QStringLiteral("<left>");
+    if (vk == VK_UP) return QStringLiteral("<up>");
+    if (vk == VK_RIGHT) return QStringLiteral("<right>");
+    if (vk == VK_DOWN) return QStringLiteral("<down>");
     return {};
 }
 
@@ -124,6 +132,10 @@ QString supportedHotkeyFromLowLevelHook(const KBDLLHOOKSTRUCT* kb) {
     if (vk == VK_SPACE) return QStringLiteral("<space>");
     if (vk == VK_END) return QStringLiteral("end");
     if (vk == VK_HOME) return QStringLiteral("<home>");
+    if (vk == VK_LEFT) return QStringLiteral("<left>");
+    if (vk == VK_UP) return QStringLiteral("<up>");
+    if (vk == VK_RIGHT) return QStringLiteral("<right>");
+    if (vk == VK_DOWN) return QStringLiteral("<down>");
     return {};
 }
 #endif
@@ -726,8 +738,7 @@ void MainWindow::keyPressEvent(QKeyEvent* event) {
         if (!key.isEmpty()) captureHotkey(key, activeModifierNames(event));
         return;
     }
-    if (event->key() == Qt::Key_Left) switchTab(-1);
-    if (event->key() == Qt::Key_Right) switchTab(1);
+    QMainWindow::keyPressEvent(event);
 }
 
 #ifdef _WIN32

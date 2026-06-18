@@ -195,7 +195,7 @@ void LargeMapRadar::processSingleFrame(int player_x, int player_y) {
             double max_val = 0.0;
             cv::Point max_loc;
             cv::minMaxLoc(res, nullptr, &max_val, nullptr, &max_loc);
-            if (std::isfinite(max_val) && max_val >= 0.75 && max_val > best_score) {
+            if (std::isfinite(max_val) && max_val >= 0.70 && max_val > best_score) {
                 best_score = max_val;
                 best = cv::Point2d(max_loc.x + tpl.cols / 2.0,
                                    static_cast<double>(max_loc.y + tpl.rows));

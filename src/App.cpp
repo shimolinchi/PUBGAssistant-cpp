@@ -56,7 +56,7 @@ App::App()
     PUBG_HEAP_PROBE("ctor.afterElevation");
     weapon_detector_ = std::make_unique<WeaponDetector>(config_, *regions_, 30, 0.65);
     PUBG_HEAP_PROBE("ctor.afterWeaponDetector");
-    equipment_detector_ = std::make_unique<EquipmentDetector>(config_, *regions_, 30, 10.0);
+    equipment_detector_ = std::make_unique<EquipmentDetector>(config_, *regions_, 60, 10.0);
     PUBG_HEAP_PROBE("ctor.afterEquipmentDetector");
     gesture_identifier_ = std::make_unique<GestureIdentifier>(config_, *regions_, 30, 0.65);
     PUBG_HEAP_PROBE("ctor.afterGestureIdentifier");
@@ -148,16 +148,6 @@ void App::registerHotkeys() {
             QMetaObject::invokeMethod(main_window_, [this] { main_window_->toggleWindowVisible(); }, Qt::QueuedConnection);
         }
     });
-    hotkeys_.addHotkey("tab_left", VK_LEFT, [this] {
-        if (main_window_) {
-            QMetaObject::invokeMethod(main_window_, [this] { main_window_->switchTab(-1); }, Qt::QueuedConnection);
-        }
-    });
-    hotkeys_.addHotkey("tab_right", VK_RIGHT, [this] {
-        if (main_window_) {
-            QMetaObject::invokeMethod(main_window_, [this] { main_window_->switchTab(1); }, Qt::QueuedConnection);
-        }
-    });
     hotkeys_.addHotkey("toggle_equipment", hotkeyCombo("toggle_equipment", ""), [this] {
         const bool enabled = [this] {
             std::lock_guard lock(state_mutex_);
@@ -169,6 +159,18 @@ void App::registerHotkeys() {
     });
     hotkeys_.addHotkey("marker_prev", hotkeyCombo("marker_prev", "q"), [this] { cycleMarkerColor(-1); });
     hotkeys_.addHotkey("marker_next", hotkeyCombo("marker_next", "e"), [this] { cycleMarkerColor(1); });
+    hotkeys_.addStateWatcher("sg_peek_left", InputController::parseVirtualKey("q"), [this](bool pressed) {
+        if (pressed && recoil_) {
+            recoil_->setSgPeekDirection(1);
+            updateStatusHud();
+        }
+    });
+    hotkeys_.addStateWatcher("sg_peek_right", InputController::parseVirtualKey("e"), [this](bool pressed) {
+        if (pressed && recoil_) {
+            recoil_->setSgPeekDirection(2);
+            updateStatusHud();
+        }
+    });
     hotkeys_.addStateWatcher("throw", hotkeyVk("throw", "b"), [this](bool pressed) {
         const bool should_throw = [this] {
             std::lock_guard lock(state_mutex_);
@@ -503,7 +505,7 @@ void App::cycleMarkerColor(int direction) {
 }
 
 void App::updateWeaponFromDetectors(const std::string& weapon, double score) {
-    if (recoil_->isFiring()) {
+    if (InputController::isLeftMouseDown()) {
         return;
     }
     bool recoil_enabled = false;
@@ -512,13 +514,16 @@ void App::updateWeaponFromDetectors(const std::string& weapon, double score) {
         current_weapon_ = weapon;
         recoil_enabled = recoil_enabled_;
     }
-    if (recoil_enabled) {
-        if (isRecoilWeapon(weapon)) {
-            recoil_->updateCurrentWeapon(weapon);
+    if (isRecoilWeapon(weapon)) {
+        recoil_->updateCurrentWeapon(weapon);
+        if (recoil_enabled) {
             syncRecoilAttachmentsForCurrentWeapon();
-        } else {
-            recoil_->updateCurrentWeapon("");
         }
+    } else if (weapon.empty()) {
+        recoil_->updateCurrentWeapon("");
+    } else {
+        recoil_->updateCurrentWeapon("");
+        recoil_->hideSgPeekDirection();
     }
     special_->setCurrentWeapon(weapon);
     if (!weapon.empty()) {
@@ -527,6 +532,7 @@ void App::updateWeaponFromDetectors(const std::string& weapon, double score) {
     updateAssistantRouting();
     if (status_hud_) {
         status_hud_->setCurrentWeapon(weapon);
+        status_hud_->setPeekDirection(recoil_->sgPeekDirection(), recoil_->shouldShowSgPeekDirection());
     }
     std::cout << "[weapon] " << (weapon.empty() ? "(none)" : weapon) << " score=" << score << "\n";
 }
@@ -667,6 +673,8 @@ void App::updateStatusHud() {
     status_hud_->setSwitches(weapon_detection, display, recoil);
     status_hud_->setCurrentWeapon(current_weapon);
     status_hud_->setStance(current_stance);
+    status_hud_->setPeekDirection(recoil_ ? recoil_->sgPeekDirection() : 0,
+                                  recoil_ && recoil_->shouldShowSgPeekDirection());
     status_hud_->setMarkerIndicatorVisible(display);
 }
 

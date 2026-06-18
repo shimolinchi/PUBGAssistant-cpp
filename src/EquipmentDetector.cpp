@@ -1,5 +1,7 @@
 #include "EquipmentDetector.hpp"
 
+#include <thread>
+
 namespace pubg {
 
 EquipmentDetector::EquipmentDetector(Config& config, RegionManager& regions, int fps, double idle_timeout)
@@ -231,7 +233,7 @@ void EquipmentDetector::requestEquipmentConfirmation() {
     scan_requested_ = true;
     {
         std::lock_guard lock(mutex_);
-        confirming_until_time_ = nowSeconds() + 0.8;
+        confirming_until_time_ = nowSeconds() + 1.2;
         consecutive_no_numbers_ = 0;
     }
     emitStatus("confirming");
@@ -265,7 +267,7 @@ void EquipmentDetector::run() {
             std::this_thread::sleep_for(std::chrono::milliseconds(sleepMsForFps(fps_, nowSeconds() - start)));
             continue;
         }
-        const bool equipment_open = n1 && n2;
+        const bool equipment_open = n1 || n2;
         const bool forced = scan_requested_.exchange(false);
 
         if (equipment_open) {
@@ -326,8 +328,14 @@ void EquipmentDetector::scanCurrentEquipment(ScreenCapture& capture, std::uint64
     if (!active_ || session_id != session_id_.load()) {
         return;
     }
-    WeaponSlotInfo slot1 = detectWeapon(capture, 1);
-    WeaponSlotInfo slot2 = detectWeapon(capture, 2);
+    WeaponSlotInfo slot1;
+    WeaponSlotInfo slot2;
+    std::thread slot2_worker([&] {
+        ScreenCapture slot2_capture;
+        slot2 = detectWeapon(slot2_capture, 2);
+    });
+    slot1 = detectWeapon(capture, 1);
+    slot2_worker.join();
     if (!active_ || session_id != session_id_.load()) {
         return;
     }

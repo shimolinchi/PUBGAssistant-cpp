@@ -91,7 +91,7 @@ std::vector<TargetPoint> MinimapRadar::matchColorCandidates(const cv::Mat& mask,
             double max_val = 0.0;
             cv::Point max_loc;
             cv::minMaxLoc(res, nullptr, &max_val, nullptr, &max_loc);
-            if (max_val >= 0.75) {
+            if (max_val >= 0.70) {
                 TargetPoint pt;
                 pt.color_name = color.name;
                 pt.hex = color.hex;

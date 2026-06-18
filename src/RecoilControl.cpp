@@ -23,6 +23,9 @@ RecoilControl::~RecoilControl() {
     if (worker_.joinable()) {
         worker_.join();
     }
+    if (sg_action_thread_.joinable()) {
+        sg_action_thread_.join();
+    }
     InputController::keyUp(fire_vk_);
 #endif
 }
@@ -76,8 +79,10 @@ void RecoilControl::loadConfig() {
     const auto sr_cfg = rc.value("sr_breath_control", Json::object());
     sr_scope_delay_ = sr_cfg.value("scope_delay", sr_scope_delay_);
     sr_track_interval_ = sr_cfg.value("track_interval", sr_track_interval_);
+    sr_track_interval_ = std::max(1.0 / 60.0, sr_track_interval_);
     sr_move_scale_ = sr_cfg.value("move_scale", sr_move_scale_);
     sr_max_step_ = sr_cfg.value("max_step", sr_max_step_);
+    sr_max_edge_delta_ = sr_cfg.value("max_edge_delta", sr_max_edge_delta_);
     sr_miss_limit_ = sr_cfg.value("miss_limit", sr_miss_limit_);
     sr_min_confidence_ = sr_cfg.value("min_confidence", sr_min_confidence_);
     sr_invert_y_ = sr_cfg.value("invert_y", sr_invert_y_);
@@ -129,6 +134,30 @@ bool RecoilControl::isFiring() const {
     return firing_;
 }
 
+void RecoilControl::setSgPeekDirection(int direction) {
+    std::lock_guard lock(mutex_);
+    if (!sg_peek_visible_) {
+        return;
+    }
+    sg_peek_direction_ = direction >= 1 && direction <= 2 ? direction : 0;
+}
+
+int RecoilControl::sgPeekDirection() const {
+    std::lock_guard lock(mutex_);
+    return sg_peek_direction_;
+}
+
+bool RecoilControl::shouldShowSgPeekDirection() const {
+    std::lock_guard lock(mutex_);
+    return sg_peek_visible_;
+}
+
+void RecoilControl::hideSgPeekDirection() {
+    std::lock_guard lock(mutex_);
+    sg_peek_direction_ = 0;
+    sg_peek_visible_ = false;
+}
+
 void RecoilControl::setEnabled(bool enabled) {
     enabled_ = enabled;
     if (!enabled) {
@@ -147,6 +176,17 @@ void RecoilControl::updateCurrentWeapon(const std::string& weapon) {
     if (weapon == current_weapon_) {
         return;
     }
+    const bool was_sg = weapon_type_ == "sg";
+    if (weapon.empty()) {
+        current_weapon_.clear();
+        firing_ = false;
+        fire_start_ = 0.0;
+#if PUBG_ENABLE_INPUT_CONTROL
+        InputController::keyUp(fire_vk_);
+#endif
+        stopSrBreathTrackingLocked();
+        return;
+    }
     current_weapon_ = weapon;
     firing_ = false;
     fire_start_ = 0.0;
@@ -158,10 +198,21 @@ void RecoilControl::updateCurrentWeapon(const std::string& weapon) {
         weapon_type_ = "ar";
         recoil_curve_.clear();
         auto_fire_ = false;
+        sg_peek_direction_ = 0;
+        sg_peek_visible_ = false;
         stopSrBreathTrackingLocked();
         return;
     }
     weapon_type_ = it->second.value("type", "ar");
+    if (weapon_type_ == "sg") {
+        sg_peek_visible_ = true;
+        if (!was_sg) {
+            sg_peek_direction_ = 0;
+        }
+    } else {
+        sg_peek_direction_ = 0;
+        sg_peek_visible_ = false;
+    }
     auto_fire_ = it->second.value("auto_fire", false);
     recoil_curve_ = weapon_type_ == "sr" ? std::vector<double>{} :
         normalizeCurve(it->second.contains("recoil_curve") ? it->second["recoil_curve"] : it->second.value("base", Json(0.0)), 0.0);
@@ -217,6 +268,7 @@ void RecoilControl::workerLoop() {
     bool last_right = false;
     ScreenCapture capture;
     while (running_) {
+        const double loop_start = nowSeconds();
         double delay_seconds = 0.02;
         const bool left = InputController::isLeftMouseDown();
         const bool right = InputController::isKeyDown(VK_RBUTTON);
@@ -231,16 +283,22 @@ void RecoilControl::workerLoop() {
                 }
             }
             if (left && !last_left) {
-                InputController::keyDown(fire_vk_);
-                if (enabled_ && !current_weapon_.empty() && weapon_type_ != "sr") {
-                    if (weapon_type_ == "dmr") {
-                        const int strength = static_cast<int>(std::round(calculateStrength(0.0)));
-                        if (strength > 0) {
-                            InputController::moveMouseRelative(0, strength);
+                const bool sg_quick_peek = enabled_ && !current_weapon_.empty() &&
+                    weapon_type_ == "sg" && sg_peek_direction_ != 0;
+                if (sg_quick_peek) {
+                    triggerSgQuickPeekShot(sg_peek_direction_);
+                } else {
+                    InputController::keyDown(fire_vk_);
+                    if (enabled_ && !current_weapon_.empty() && weapon_type_ != "sr") {
+                        if (weapon_type_ == "dmr") {
+                            const int strength = static_cast<int>(std::round(calculateStrength(0.0)));
+                            if (strength > 0) {
+                                InputController::moveMouseRelative(0, strength);
+                            }
+                        } else {
+                            firing_ = true;
+                            fire_start_ = nowSeconds();
                         }
-                    } else {
-                        firing_ = true;
-                        fire_start_ = nowSeconds();
                     }
                 }
             } else if (!left && last_left) {
@@ -265,8 +323,50 @@ void RecoilControl::workerLoop() {
         applySrBreathControl(capture);
         last_left = left;
         last_right = right;
-        std::this_thread::sleep_for(std::chrono::milliseconds(static_cast<int>(std::max(1.0, delay_seconds * 1000.0))));
+        const double elapsed = nowSeconds() - loop_start;
+        const double sleep_seconds = std::max(0.001, delay_seconds - elapsed);
+        std::this_thread::sleep_for(std::chrono::milliseconds(static_cast<int>(std::round(sleep_seconds * 1000.0))));
     }
+#endif
+}
+
+void RecoilControl::triggerSgQuickPeekShot(int direction) {
+#if PUBG_ENABLE_INPUT_CONTROL
+    if (direction != 1 && direction != 2) {
+        return;
+    }
+    bool expected = false;
+    if (!sg_action_running_.compare_exchange_strong(expected, true)) {
+        return;
+    }
+    const int fire_vk = fire_vk_;
+    if (sg_action_thread_.joinable()) {
+        sg_action_thread_.join();
+    }
+    sg_action_thread_ = std::thread([this, direction, fire_vk] {
+        const int lean_vk = direction == 1 ? 'Q' : 'E';
+        const int move_vk = direction == 1 ? 'A' : 'D';
+        InputController::mouseRightDown();
+        std::this_thread::sleep_for(std::chrono::milliseconds(40));
+        InputController::keyDown(lean_vk);
+        InputController::keyDown(move_vk);
+        InputController::keyDown(VK_CONTROL);
+        std::this_thread::sleep_for(std::chrono::milliseconds(150));
+        InputController::keyDown(fire_vk);
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        InputController::keyUp(fire_vk);
+        InputController::keyUp(lean_vk);
+        InputController::keyUp(move_vk);
+        InputController::keyUp(VK_CONTROL);
+        InputController::mouseRightUp();
+        const int counter_move_vk = direction == 1 ? 'D' : 'A';
+        InputController::keyDown(counter_move_vk);
+        std::this_thread::sleep_for(std::chrono::milliseconds(35));
+        InputController::keyUp(counter_move_vk);
+        sg_action_running_ = false;
+    });
+#else
+    (void)direction;
 #endif
 }
 
@@ -284,6 +384,7 @@ void RecoilControl::startSrBreathTrackingLocked() {
     sr_miss_count_ = 0;
     sr_edge_hit_streak_ = 0;
     sr_scope_active_ = false;
+    sr_resume_after_movement_ = false;
     sr_last_confirmed_edge_time_ = 0.0;
     sr_last_track_time_ = 0.0;
     if (!sr_breath_enabled_) {
@@ -330,6 +431,7 @@ void RecoilControl::stopSrBreathTrackingLocked() {
     sr_probe_until_ = 0.0;
     sr_scope_active_ = false;
     sr_edge_hit_streak_ = 0;
+    sr_resume_after_movement_ = false;
     sr_last_confirmed_edge_time_ = 0.0;
     sr_last_track_time_ = 0.0;
     sr_tracker_.reset();
@@ -354,6 +456,15 @@ void RecoilControl::applySrBreathControl(ScreenCapture& capture) {
         stopSrBreathTrackingLocked();
         return;
     }
+    if (InputController::isKeyDown('W') || InputController::isKeyDown('A') ||
+        InputController::isKeyDown('S') || InputController::isKeyDown('D')) {
+        tracker->reset();
+        if (sr_scope_active_) {
+            sr_last_confirmed_edge_time_ = now;
+            sr_resume_after_movement_ = true;
+        }
+        return;
+    }
 
     auto [dy, confidence, found] = tracker->detectMotion(capture);
     if (!found || confidence < sr_min_confidence_) {
@@ -369,6 +480,11 @@ void RecoilControl::applySrBreathControl(ScreenCapture& capture) {
     }
 
     sr_miss_count_ = 0;
+    if (sr_scope_active_ && sr_resume_after_movement_) {
+        sr_resume_after_movement_ = false;
+        sr_last_confirmed_edge_time_ = now;
+        return;
+    }
     ++sr_edge_hit_streak_;
     const int confirm_frames = std::max(1, sr_scope_confirm_frames_);
     if (sr_edge_hit_streak_ >= confirm_frames) {
@@ -388,6 +504,12 @@ void RecoilControl::applySrBreathControl(ScreenCapture& capture) {
         if (now > sr_probe_until_) {
             stopSrBreathTrackingLocked();
         }
+        return;
+    }
+
+    if (std::abs(dy) > std::max(1.0, sr_max_edge_delta_)) {
+        sr_edge_hit_streak_ = 0;
+        sr_last_confirmed_edge_time_ = now;
         return;
     }
 
