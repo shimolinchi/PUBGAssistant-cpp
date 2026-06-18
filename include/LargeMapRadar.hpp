@@ -34,6 +34,7 @@ public:
 
     // 最近一次测得的各颜色标点距离。
     [[nodiscard]] DistanceMap measuredDistance() const;
+    [[nodiscard]] bool isBusy() const;
 
 private:
     // 常驻工作线程循环：等待点击投递的测距任务并执行，避免在输入钩子线程上做重活。
@@ -49,12 +50,16 @@ private:
     RegionManager& regions_;
     std::vector<MarkerColor> colors_;
     std::vector<cv::Mat> point_templates_;
+    int max_tpl_w_ = 1;
+    int max_tpl_h_ = 1;
+    cv::Mat kernel_ = cv::Mat::ones(3, 3, CV_8U);
     mutable std::mutex mutex_;
     std::condition_variable cv_;
     std::atomic_bool display_{false};
     std::atomic_bool stop_{false};
     bool waiting_click_ = false;
     bool calculating_ = false;
+    std::atomic_bool cancel_requested_{false};
     // 待处理的一次性测距任务：点击在钩子线程写入，工作线程取出执行。
     bool job_pending_ = false;
     int job_x_ = 0;

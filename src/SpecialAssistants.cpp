@@ -117,8 +117,10 @@ std::optional<std::pair<double, double>> SpecialAssistants::cachedCrosshairCente
     return std::nullopt;
 }
 
-SpecialAssistants::SpecialAssistants(Config& config, RegionManager& regions, MinimapRadar& minimap, ElevationRadar& elevation)
-    : config_(config), regions_(regions), minimap_(minimap), elevation_(elevation), ballistics_(config), hex_(config.markerHex()) {
+SpecialAssistants::SpecialAssistants(Config& config, RegionManager& regions, MinimapRadar& minimap,
+                                     ElevationRadar& elevation, LargeMapRadar& large_map)
+    : config_(config), regions_(regions), minimap_(minimap), elevation_(elevation), large_map_(large_map),
+      ballistics_(config), hex_(config.markerHex()) {
     overlay_.create(L"PUBGAssistant Special", regions_.screenWidth(), regions_.screenHeight(), true);
     worker_ = std::thread(&SpecialAssistants::run, this);
 }
@@ -163,10 +165,13 @@ void SpecialAssistants::drawRocket(const DistanceMap& dists, const std::unordere
     cmds.push_back({OverlayCommand::Type::Line, cx, cy, cx, regions_.screenHeight() * 0.9,
                     0, "", hexToBgr("#FFFFFF"), 1, 18, 255});
     for (const auto& [color, dist] : dists) {
-        if (dist <= 0.0 || dist > 170.0) {
+        if (dist <= 0.0 || dist > 175.0) {
             continue;
         }
         const double ratio = ballistics_.rocketRatio(dist);
+        if (!std::isfinite(ratio) || ratio <= 0.0) {
+            continue;
+        }
         const double y = std::min(cy + ratio * line_len, regions_.screenHeight() - 10.0);
         const auto bgr = hexToBgr(hex.count(color) ? hex.at(color) : "#FFFFFF");
         cmds.push_back({OverlayCommand::Type::Line, cx - 28, y, cx + 28, y, 0, "", bgr, 2});
@@ -236,12 +241,30 @@ void SpecialAssistants::drawMortar(const DistanceMap& dists, const ElevationMap&
                                    const std::unordered_map<std::string, std::string>& hex,
                                    std::vector<OverlayCommand>& cmds) {
     const auto layout = assistHudLayout(regions_);
+    drawDistancePanelRow(dists, elevs, hex, cmds, layout.mortar_y, true);
+}
+
+void SpecialAssistants::drawLargeMapDistances(const DistanceMap& dists, const ElevationMap& elevs,
+                                              const std::unordered_map<std::string, std::string>& hex,
+                                              std::vector<OverlayCommand>& cmds) {
+    const auto layout = assistHudLayout(regions_);
+    drawDistancePanelRow(dists, elevs, hex, cmds, layout.large_y, true);
+}
+
+void SpecialAssistants::drawDistancePanelRow(const DistanceMap& dists, const ElevationMap& elevs,
+                                             const std::unordered_map<std::string, std::string>& hex,
+                                             std::vector<OverlayCommand>& cmds, double y,
+                                             bool apply_elevation) const {
+    const auto layout = assistHudLayout(regions_);
+    const std::vector<std::string> color_order{"Yellow", "Orange", "Blue", "Green"};
     int i = 0;
-    for (const auto& [color, dist] : dists) {
+    for (const auto& color : color_order) {
+        const auto dist_it = dists.find(color);
+        const double dist = dist_it != dists.end() ? dist_it->second : 0.0;
         const std::string color_hex = hex.count(color) ? hex.at(color) : "#FFFFFF";
         const auto bgr = hexToBgr(color_hex);
         const auto elev_it = elevs.find(color);
-        const bool has_elevation = elev_it != elevs.end() && elev_it->second > 0.0;
+        const bool has_elevation = apply_elevation && elev_it != elevs.end() && elev_it->second > 0.0;
         const double elev = has_elevation ? elev_it->second : 0.0;
         const double true_dist = dist > 0.0 && has_elevation ? ballistics_.mortarTrueDistance(dist, elev) : 0.0;
         std::string text = "---";
@@ -260,7 +283,7 @@ void SpecialAssistants::drawMortar(const DistanceMap& dists, const ElevationMap&
             font_size = 14;
         }
         const double bx = layout.x + i * (layout.box_w + layout.spacing);
-        const double by = layout.mortar_y;
+        const double by = y;
         cmds.push_back({OverlayCommand::Type::RoundedRect, bx, by, bx + layout.box_w, by + layout.box_h,
                         10, "", bgr, 0, 18, fill_alpha});
         cmds.push_back({OverlayCommand::Type::RoundedRect, bx, by, bx + layout.box_w, by + layout.box_h,
@@ -268,7 +291,6 @@ void SpecialAssistants::drawMortar(const DistanceMap& dists, const ElevationMap&
         cmds.push_back({OverlayCommand::Type::TextCenter, bx, by, bx + layout.box_w, by + layout.box_h,
                         0, text, hexToBgr("#FFFFFF"), 1, font_size, 255});
         ++i;
-        if (i >= 4) break;
     }
 }
 
@@ -287,14 +309,19 @@ void SpecialAssistants::run() {
                 manual = manual_;
                 hex = hex_;
             }
-            drawMortar(dists, elevs, hex, cmds);
-            if (weapon == "Rocket" || manual["rocket"]) {
+            if (manual["mortar"]) {
+                drawMortar(dists, elevs, hex, cmds);
+            }
+            if (manual["mortar"] && !large_map_.isBusy()) {
+                drawLargeMapDistances(large_map_.measuredDistance(), elevs, hex, cmds);
+            }
+            if (manual["rocket"]) {
                 drawRocket(dists, hex, cmds);
             }
-            if (weapon == "VSS" || manual["vss"]) {
+            if (manual["vss"]) {
                 drawVss(dists, hex, cmds);
             }
-            if (weapon == "Crossbow" || manual["crossbow"]) {
+            if (manual["crossbow"]) {
                 drawCrossbow(dists, hex, cmds);
             }
         }

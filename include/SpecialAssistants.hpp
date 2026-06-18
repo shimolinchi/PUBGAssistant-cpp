@@ -2,6 +2,7 @@
 
 #include "Ballistics.hpp"
 #include "ElevationRadar.hpp"
+#include "LargeMapRadar.hpp"
 #include "MinimapRadar.hpp"
 #include "OverlayWindow.hpp"
 #include "ScreenCapture.hpp"
@@ -13,7 +14,8 @@ namespace pubg {
 
 class SpecialAssistants {
 public:
-    SpecialAssistants(Config& config, RegionManager& regions, MinimapRadar& minimap, ElevationRadar& elevation);
+    SpecialAssistants(Config& config, RegionManager& regions, MinimapRadar& minimap,
+                      ElevationRadar& elevation, LargeMapRadar& large_map);
     ~SpecialAssistants();
 
     void setDisplayEnabled(bool enabled);
@@ -37,11 +39,18 @@ private:
     void drawMortar(const DistanceMap& dists, const ElevationMap& elevs,
                     const std::unordered_map<std::string, std::string>& hex,
                     std::vector<OverlayCommand>& cmds);
+    void drawLargeMapDistances(const DistanceMap& dists, const ElevationMap& elevs,
+                               const std::unordered_map<std::string, std::string>& hex,
+                               std::vector<OverlayCommand>& cmds);
+    void drawDistancePanelRow(const DistanceMap& dists, const ElevationMap& elevs,
+                              const std::unordered_map<std::string, std::string>& hex,
+                              std::vector<OverlayCommand>& cmds, double y, bool apply_elevation) const;
 
     Config& config_;
     RegionManager& regions_;
     MinimapRadar& minimap_;
     ElevationRadar& elevation_;
+    LargeMapRadar& large_map_;
 
     Ballistics ballistics_;
     std::unordered_map<std::string, std::string> hex_;

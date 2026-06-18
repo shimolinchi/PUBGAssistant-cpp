@@ -96,6 +96,7 @@ private:
     // 构建窗口标题栏、tab bar 和四个页面。
     void buildUi();
     void buildTitleBar(QWidget* root);
+    void applyNativeWindowIcon();
     void applyNativeRoundedRegion();
     QWidget* addTab(const QString& title);
     void selectTab(int index);

@@ -14,7 +14,6 @@
 #if defined(_WIN32) && defined(_DEBUG)
 #include <crtdbg.h>
 namespace {
-// 设 PUBG_HEAPCHECK=1 后，在关键节点校验整个调试堆，第一处报损坏即定位越界点附近。
 bool heapCheckEnabled() {
     static const bool on = [] {
         size_t len = 0;
@@ -62,13 +61,13 @@ App::App()
     PUBG_HEAP_PROBE("ctor.afterGestureIdentifier");
     recoil_ = std::make_unique<RecoilControl>(config_, regions_.get());
     PUBG_HEAP_PROBE("ctor.afterRecoil");
-    special_ = std::make_unique<SpecialAssistants>(config_, *regions_, *minimap_, *elevation_);
+    large_map_ = std::make_unique<LargeMapRadar>(config_, *regions_);
+    PUBG_HEAP_PROBE("ctor.afterLargeMap");
+    special_ = std::make_unique<SpecialAssistants>(config_, *regions_, *minimap_, *elevation_, *large_map_);
     PUBG_HEAP_PROBE("ctor.afterSpecial");
     map_points_ = std::make_unique<MapPointAssistant>(config_, *regions_);
     PUBG_HEAP_PROBE("ctor.afterMapPoints");
-    large_map_ = std::make_unique<LargeMapRadar>(config_, *regions_);
-    PUBG_HEAP_PROBE("ctor.afterLargeMap");
-    mortar_auto_aim_ = std::make_unique<MortarAutoAim>(config_, *minimap_, *large_map_,
+    mortar_auto_aim_ = std::make_unique<MortarAutoAim>(config_, *minimap_, *large_map_, *elevation_,
         [this](const std::string& message, const std::string& marker_color) {
         if (status_hud_) {
             const auto hex = config_.markerHex();
@@ -83,9 +82,9 @@ App::App()
     PUBG_HEAP_PROBE("ctor.afterC4");
     status_hud_ = std::make_unique<StatusHud>(config_, *regions_);
     PUBG_HEAP_PROBE("ctor.afterStatusHud");
-    manual_assistants_ = {
-        {"mortar", false}, {"rocket", false}, {"throwables", false},
-        {"vss", false}, {"crossbow", false}, {"c4", false},
+    assistant_enabled_ = {
+        {"mortar", true}, {"rocket", true}, {"throwables", true},
+        {"vss", true}, {"crossbow", true}, {"c4", true},
     };
     wireCallbacks();
     PUBG_HEAP_PROBE("ctor.afterWireCallbacks");
@@ -124,12 +123,9 @@ std::string App::currentMarkerColor() const {
 }
 
 void App::registerHotkeys() {
-    // F1~F12 被键盘钩子吞掉、不传给系统；但当游戏（默认 TslGame.exe，可在 config.json 的
-    // game_process 改）或本程序自身处于前台时放行，使游戏能收到 F8 开火、本程序能录制 F 键。
     hotkeys_.setPassthroughProcess(config_.read([](const Json& data) {
         return data.value("game_process", std::string("TslGame.exe"));
     }));
-    // Home 等键照常放行，只触发对应功能。
     hotkeys_.addHotkey("toggle_weapon_detection", hotkeyCombo("toggle_weapon_detection", "<f1>"), [this] { toggleWeaponDetection(); });
     hotkeys_.addHotkey("toggle_display", hotkeyCombo("toggle_display", "<f2>"), [this] { toggleDisplay(); });
 #if PUBG_ENABLE_INPUT_CONTROL
@@ -183,18 +179,25 @@ void App::registerHotkeys() {
     hotkeys_.addStateWatcher("left_mouse", VK_LBUTTON, [this](bool pressed) {
         bool show_map_points = false;
         bool weapon_detection = false;
+        std::optional<std::pair<std::string, double>> pending_weapon;
         {
             std::lock_guard lock(state_mutex_);
             left_pressed_ = pressed;
             show_map_points = left_pressed_ && middle_pressed_ && current_weapon_.empty();
             weapon_detection = weapon_detection_enabled_;
+            if (!pressed) {
+                pending_weapon = pending_weapon_update_;
+                pending_weapon_update_.reset();
+            }
         }
         if (pressed) {
             const auto [x, y] = InputController::cursorPosition();
             large_map_->onMouseClick(x, y, true);
             c4_->onMouseLeftPress();
         } else if (weapon_detection) {
-            // 鼠标左键松开（多为拖完配件）后触发一次装备栏识别更新。
+            if (pending_weapon) {
+                applyWeaponUpdate(pending_weapon->first, pending_weapon->second);
+            }
             equipment_detector_->requestScan();
         }
         if (show_map_points) {
@@ -222,10 +225,24 @@ void App::registerHotkeys() {
             weapon_detection = weapon_detection_enabled_;
         }
         c4_->onMouseRightClick(pressed);
+        if (pressed && large_map_) {
+            large_map_->cancel();
+        }
         if (!pressed && weapon_detection) {
             equipment_detector_->requestScan();
         }
         if (hide_map_points && map_points_) {
+            map_points_->setEnabled(false);
+        }
+    });
+    hotkeys_.addStateWatcher("cancel_map_helpers", InputController::parseVirtualKey("m"), [this](bool pressed) {
+        if (!pressed) {
+            return;
+        }
+        if (large_map_) {
+            large_map_->cancel();
+        }
+        if (map_points_) {
             map_points_->setEnabled(false);
         }
     });
@@ -236,7 +253,6 @@ void App::registerHotkeys() {
 }
 
 void App::reloadHotkeys() {
-    // 先停热键线程再持 control_mutex_，理由同 shutdown()：避免 join 与回调争锁死锁。
     const bool was_running = hotkeys_.isRunning();
     hotkeys_.clear();
     std::lock_guard control_lock(control_mutex_);
@@ -256,8 +272,6 @@ void App::shutdown() {
         shutting_down_ = true;
     }
     PUBG_HEAP_PROBE("shutdown.enter");
-    // 先停热键线程（不持 control_mutex_）：热键回调（如 toggleDisplay）会锁 control_mutex_，
-    // 若在这里持锁再 join，会与正在执行的回调互相等待造成死锁。
     hotkeys_.stop();
     std::lock_guard control_lock(control_mutex_);
     equipment_detector_->setEnabled(false);
@@ -273,18 +287,13 @@ void App::shutdown() {
     special_->shutdown();
     c4_->shutdown();
 
-    // 确定性地销毁所有带后台线程的模块，趁 config_ 等成员都还存活。
-    // 否则这些 worker（recoil/large_map/throwables 等）只在各自析构里 join，
-    // 会一直跑到 ~App()——而 manual_assistants_ 等成员声明在这些 unique_ptr 之后、
-    // 会先被析构，造成“线程仍在跑时成员已销毁”的竞态（点红点退出时崩在 ~unordered_map）。
-    // 按构造逆序 reset，确保所有线程在此刻全部停止。
     status_hud_.reset();
     c4_.reset();
     throwables_.reset();
     mortar_auto_aim_.reset();
+    special_.reset();
     large_map_.reset();
     map_points_.reset();
-    special_.reset();
     recoil_.reset();
     gesture_identifier_.reset();
     equipment_detector_.reset();
@@ -401,7 +410,7 @@ void App::setWeaponDetectionEnabled(bool enabled) {
     equipment_detector_->setEnabled(enabled);
     gesture_identifier_->setEnabled(enabled);
     if (!enabled) {
-        updateWeaponFromDetectors("", 0.0);
+        applyWeaponUpdate("", 0.0);
     }
     updateStatusHud();
     printStatus();
@@ -424,12 +433,6 @@ void App::setDisplayEnabled(bool enabled) {
     special_->setDisplayEnabled(enabled);
     if (!enabled) {
         map_points_->setEnabled(false);
-        {
-            std::lock_guard lock(state_mutex_);
-            for (auto& [_, state] : manual_assistants_) {
-                state = false;
-            }
-        }
         throwables_->setEnabled(false);
         c4_->setEnabled(false);
     }
@@ -506,13 +509,20 @@ void App::cycleMarkerColor(int direction) {
 
 void App::updateWeaponFromDetectors(const std::string& weapon, double score) {
     if (InputController::isLeftMouseDown()) {
+        std::lock_guard lock(state_mutex_);
+        pending_weapon_update_ = std::make_pair(weapon, score);
         return;
     }
+    applyWeaponUpdate(weapon, score);
+}
+
+void App::applyWeaponUpdate(const std::string& weapon, double score) {
     bool recoil_enabled = false;
     {
         std::lock_guard lock(state_mutex_);
         current_weapon_ = weapon;
         recoil_enabled = recoil_enabled_;
+        pending_weapon_update_.reset();
     }
     if (isRecoilWeapon(weapon)) {
         recoil_->updateCurrentWeapon(weapon);
@@ -599,15 +609,11 @@ void App::syncRecoilAttachmentsForCurrentWeapon() {
     }
 }
 
-void App::setAssistantManual(const std::string& key, bool enabled) {
+void App::setAssistantEnabled(const std::string& key, bool enabled) {
     std::lock_guard control_lock(control_mutex_);
     {
         std::lock_guard lock(state_mutex_);
-        if (!display_enabled_) {
-            manual_assistants_[key] = false;
-        } else {
-            manual_assistants_[key] = enabled;
-        }
+        assistant_enabled_[key] = enabled;
     }
     updateAssistantRouting();
 }
@@ -620,12 +626,12 @@ bool App::shouldShowMarkerIndicator() const {
 void App::updateAssistantRouting() {
     bool display_enabled = false;
     std::string current_weapon;
-    std::unordered_map<std::string, bool> manual;
+    std::unordered_map<std::string, bool> assistant_enabled;
     {
         std::lock_guard lock(state_mutex_);
         display_enabled = display_enabled_;
         current_weapon = current_weapon_;
-        manual = manual_assistants_;
+        assistant_enabled = assistant_enabled_;
     }
 
     if (!display_enabled) {
@@ -639,13 +645,13 @@ void App::updateAssistantRouting() {
         return;
     }
 
-    special_->setManualEnabled("mortar", true);
-    special_->setManualEnabled("rocket", manual["rocket"]);
-    special_->setManualEnabled("vss", manual["vss"]);
-    special_->setManualEnabled("crossbow", manual["crossbow"]);
+    special_->setManualEnabled("mortar", assistant_enabled["mortar"]);
+    special_->setManualEnabled("rocket", assistant_enabled["rocket"] && current_weapon == "Rocket");
+    special_->setManualEnabled("vss", assistant_enabled["vss"] && current_weapon == "VSS");
+    special_->setManualEnabled("crossbow", assistant_enabled["crossbow"] && current_weapon == "Crossbow");
 
-    const bool throwables_on = manual["throwables"] || current_weapon == "Grenade";
-    const bool c4_on = manual["c4"] || current_weapon == "C4";
+    const bool throwables_on = assistant_enabled["throwables"] && current_weapon == "Grenade";
+    const bool c4_on = assistant_enabled["c4"] && current_weapon == "C4";
     throwables_->setEnabled(throwables_on);
     c4_->setEnabled(c4_on);
     if (status_hud_) {
@@ -704,7 +710,7 @@ int App::run() {
     callbacks.set_weapon_detection = [this](bool enabled) { setWeaponDetectionEnabled(enabled); };
     callbacks.set_display = [this](bool enabled) { setDisplayEnabled(enabled); };
     callbacks.set_recoil = [this](bool enabled) { setRecoilEnabled(enabled); };
-    callbacks.set_assistant = [this](const std::string& key, bool enabled) { setAssistantManual(key, enabled); };
+    callbacks.set_assistant = [this](const std::string& key, bool enabled) { setAssistantEnabled(key, enabled); };
     callbacks.sync_marker_colors = [this] { syncMarkerColorsFromConfig(); };
     callbacks.reload_hotkeys = [this] { reloadHotkeys(); };
     callbacks.shutdown = [this] { shutdown(); };

@@ -69,6 +69,9 @@ target_link_libraries(PUBGAssistant-cpp PRIVATE
 )
 
 if(WIN32)
+    target_sources(PUBGAssistant-cpp PRIVATE
+        resources/app_icon.rc
+    )
     get_filename_component(QT_VCPKG_PREFIX "${Qt6_DIR}/../.." ABSOLUTE)
     target_compile_definitions(PUBGAssistant-cpp PRIVATE
         WIN32_LEAN_AND_MEAN

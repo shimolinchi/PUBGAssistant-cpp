@@ -34,6 +34,7 @@ private:
     void executeThrow(bool jump_throw);
     bool shouldJumpThrow(double distance) const;
     void showWarning(const std::string& text);
+    void drawWarningBox(const std::string& text);
 
     Config& config_;
     RegionManager& regions_;

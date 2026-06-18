@@ -1,6 +1,8 @@
 #pragma once
 
+#include "Ballistics.hpp"
 #include "Config.hpp"
+#include "ElevationRadar.hpp"
 #include "LargeMapRadar.hpp"
 #include "MinimapRadar.hpp"
 
@@ -17,7 +19,8 @@ class MortarAutoAim {
 public:
     using MessageCallback = std::function<void(const std::string&, const std::string&)>;
 
-    MortarAutoAim(Config& config, MinimapRadar& minimap, LargeMapRadar& large_map, MessageCallback message_callback = {});
+    MortarAutoAim(Config& config, MinimapRadar& minimap, LargeMapRadar& large_map,
+                  ElevationRadar& elevation, MessageCallback message_callback = {});
     ~MortarAutoAim();
 
     void trigger(const std::string& selected_color);
@@ -42,6 +45,8 @@ private:
     Config& config_;
     MinimapRadar& minimap_;
     LargeMapRadar& large_map_;
+    ElevationRadar& elevation_;
+    Ballistics ballistics_;
     MessageCallback message_callback_;
     std::atomic_bool running_{false};
     std::thread worker_;

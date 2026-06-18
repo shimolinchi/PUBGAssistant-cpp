@@ -58,6 +58,23 @@ void ThrowablesAssistant::showWarning(const std::string& text) {
     warning_until_ = nowSeconds() + 2.0;
 }
 
+void ThrowablesAssistant::drawWarningBox(const std::string& text) {
+    const double box_w = 300.0;
+    const double box_h = 42.0;
+    const double box_x = regions_.screenWidth() / 2.0 - box_w / 2.0;
+    const double box_y = regions_.screenHeight() * 0.8 - box_h;
+    const auto bgr = hexToBgr("#E74C3C");
+    overlay_.setCommands({
+        OverlayCommand{OverlayCommand::Type::RoundedRect, box_x, box_y, box_x + box_w, box_y + box_h,
+                       10, "", bgr, 0, 18, 89},
+        OverlayCommand{OverlayCommand::Type::RoundedRect, box_x, box_y, box_x + box_w, box_y + box_h,
+                       10, "", bgr, 2, 18, 204},
+        OverlayCommand{OverlayCommand::Type::TextCenter, box_x, box_y, box_x + box_w, box_y + box_h,
+                       0, text, hexToBgr("#FFFFFF"), 1, 18, 255}
+    });
+    overlay_.pumpMessages();
+}
+
 void ThrowablesAssistant::onThrowKey(bool pressed) {
     if (!enabled_) return;
     std::lock_guard lock(mutex_);
@@ -132,11 +149,7 @@ void ThrowablesAssistant::render() {
         color = selected_color_;
         hex = hex_;
         if (!warning_text_.empty() && nowSeconds() <= warning_until_) {
-            const double cx = regions_.screenWidth() / 2.0;
-            const double y = regions_.screenHeight() * 0.75;
-            overlay_.setCommands({OverlayCommand{OverlayCommand::Type::Text, cx - 120.0, y, 0, 0, 0,
-                                                  warning_text_, hexToBgr("#E74C3C"), 1, 16}});
-            overlay_.pumpMessages();
+            drawWarningBox(warning_text_);
             return;
         }
         if (!warning_text_.empty() && nowSeconds() > warning_until_) {
@@ -151,6 +164,10 @@ void ThrowablesAssistant::render() {
     const bool jump = shouldJumpThrow(dist);
     const double ratio = ballistics_.throwableElevationRatio(dist, jump);
     const double cook = ballistics_.throwableCookTime(dist, jump);
+    if (!std::isfinite(ratio) || ratio <= 0.0 || !std::isfinite(cook) || cook <= 0.0) {
+        overlay_.clear();
+        return;
+    }
     const auto cfg = config_.read([](const Json& root) {
         return root.value("throwables_config", Json::object());
     });
@@ -171,6 +188,13 @@ void ThrowablesAssistant::render() {
     const double angle = arc_span * 0.5 - (clamped_cook / total_time) * arc_span;
     const double mark_x = cx + std::cos(angle) * arc_radius;
     const double mark_y = cy + std::sin(angle) * arc_radius;
+    const double pointer_len = 18.0;
+    const double vx = cx - mark_x;
+    const double vy = cy - mark_y;
+    const double vlen = std::max(1.0, std::hypot(vx, vy));
+    cmds.push_back({OverlayCommand::Type::Line,
+                    mark_x - 2.0, mark_y, mark_x - 2.0 + vx / vlen * pointer_len,
+                    mark_y + vy / vlen * pointer_len, 0, "", bgr, 2});
     cmds.push_back({OverlayCommand::Type::Text, mark_x + 10, mark_y - 7, 0, 0, 0,
                     oneDecimal(cook) + "s", bgr, 1, 16});
     overlay_.setCommands(std::move(cmds));

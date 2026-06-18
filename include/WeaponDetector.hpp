@@ -48,7 +48,7 @@ private:
 
     // 识别频率和阈值。target_w_/target_h_ 用于把截图缩放到和模板一致的尺寸。
     int fps_ = 30;
-    double threshold_ = 0.65;
+    double threshold_ = 0.62;
     int target_w_ = 160;
     int target_h_ = 50;
 

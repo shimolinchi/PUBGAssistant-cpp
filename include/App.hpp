@@ -36,7 +36,7 @@ public:
     void toggleWeaponDetection();
     void toggleDisplay();
     void toggleRecoil();
-    void setAssistantManual(const std::string& key, bool enabled);
+    void setAssistantEnabled(const std::string& key, bool enabled);
 
     // 切换标点颜色，供 Q/E 热键和主窗口状态同步使用。
     void cycleMarkerColor(int direction);
@@ -53,6 +53,7 @@ private:
     // WeaponDetector 识别到手持武器变化时调用。
     // weapon 为空表示当前没有识别到有效武器；score 是模板匹配置信度。
     void updateWeaponFromDetectors(const std::string& weapon, double score);
+    void applyWeaponUpdate(const std::string& weapon, double score);
 
     // EquipmentDetector 扫描装备栏后调用。
     // slots 包含 1/2 号武器槽的武器名和配件信息，用于限定手持武器候选和更新压枪倍率。
@@ -82,9 +83,9 @@ private:
     std::unique_ptr<EquipmentDetector> equipment_detector_;
     std::unique_ptr<GestureIdentifier> gesture_identifier_;
     std::unique_ptr<RecoilControl> recoil_;
+    std::unique_ptr<LargeMapRadar> large_map_;
     std::unique_ptr<SpecialAssistants> special_;
     std::unique_ptr<MapPointAssistant> map_points_;
-    std::unique_ptr<LargeMapRadar> large_map_;
     std::unique_ptr<MortarAutoAim> mortar_auto_aim_;
     std::unique_ptr<ThrowablesAssistant> throwables_;
     std::unique_ptr<C4Assistant> c4_;
@@ -106,7 +107,8 @@ private:
     std::string current_marker_color_ = "Yellow";
     std::map<int, WeaponSlotInfo> equipment_;
     std::string current_stance_;
-    std::unordered_map<std::string, bool> manual_assistants_;
+    std::unordered_map<std::string, bool> assistant_enabled_;
+    std::optional<std::pair<std::string, double>> pending_weapon_update_;
     ui::MainWindow* main_window_ = nullptr;
     bool shutting_down_ = false;
 };

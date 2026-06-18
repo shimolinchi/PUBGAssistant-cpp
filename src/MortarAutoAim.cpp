@@ -9,8 +9,10 @@
 
 namespace pubg {
 
-MortarAutoAim::MortarAutoAim(Config& config, MinimapRadar& minimap, LargeMapRadar& large_map, MessageCallback message_callback)
-    : config_(config), minimap_(minimap), large_map_(large_map), message_callback_(std::move(message_callback)) {}
+MortarAutoAim::MortarAutoAim(Config& config, MinimapRadar& minimap, LargeMapRadar& large_map,
+                             ElevationRadar& elevation, MessageCallback message_callback)
+    : config_(config), minimap_(minimap), large_map_(large_map), elevation_(elevation),
+      ballistics_(config), message_callback_(std::move(message_callback)) {}
 
 MortarAutoAim::~MortarAutoAim() {
     shutdown();
@@ -35,13 +37,20 @@ void MortarAutoAim::shutdown() {
 }
 
 std::optional<double> MortarAutoAim::targetDistance(const std::string& selected_color) const {
+    const auto elevations = elevation_.measuredElevations();
+    const auto compensate = [this, &elevations, &selected_color](double distance) {
+        if (auto elev = elevations.find(selected_color); elev != elevations.end() && elev->second > 0.0) {
+            return ballistics_.mortarTrueDistance(distance, elev->second);
+        }
+        return distance;
+    };
     const auto minimap = minimap_.measuredDistance();
     if (auto it = minimap.find(selected_color); it != minimap.end() && it->second > 0.0) {
-        return it->second;
+        return compensate(it->second);
     }
     const auto large_map = large_map_.measuredDistance();
     if (auto it = large_map.find(selected_color); it != large_map.end() && it->second > 0.0) {
-        return it->second;
+        return compensate(it->second);
     }
     return std::nullopt;
 }

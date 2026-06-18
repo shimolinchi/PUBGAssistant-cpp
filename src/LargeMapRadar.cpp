@@ -44,6 +44,10 @@ LargeMapRadar::LargeMapRadar(Config& config, RegionManager& regions)
     if (point_templates_.empty()) {
         point_templates_ = TemplateMatcher::loadAlphaBinaryTemplates(config_.paths().templatePath("pnt"));
     }
+    for (const auto& tpl : point_templates_) {
+        max_tpl_w_ = std::max(max_tpl_w_, tpl.cols);
+        max_tpl_h_ = std::max(max_tpl_h_, tpl.rows);
+    }
     overlay_.create(L"PUBGAssistant LargeMap", regions_.screenWidth(), regions_.screenHeight(), true);
     worker_ = std::thread(&LargeMapRadar::workerLoop, this);
 }
@@ -94,6 +98,7 @@ void LargeMapRadar::toggleMode() {
         std::lock_guard lock(mutex_);
         waiting_click_ = !waiting_click_;
         calculating_ = false;
+        cancel_requested_ = false;
         waiting = waiting_click_;
     }
     renderHud(waiting ? "点击大地图中的自己位置" : "");
@@ -104,6 +109,8 @@ void LargeMapRadar::cancel() {
         std::lock_guard lock(mutex_);
         waiting_click_ = false;
         calculating_ = false;
+        job_pending_ = false;
+        cancel_requested_ = true;
     }
     renderHud();
 }
@@ -119,6 +126,7 @@ void LargeMapRadar::onMouseClick(int x, int y, bool pressed) {
         }
         waiting_click_ = false;
         calculating_ = true;
+        cancel_requested_ = false;
         job_x_ = x;
         job_y_ = y;
         job_pending_ = true;
@@ -149,6 +157,11 @@ void LargeMapRadar::workerLoop() {
 DistanceMap LargeMapRadar::measuredDistance() const {
     std::lock_guard lock(mutex_);
     return distances_;
+}
+
+bool LargeMapRadar::isBusy() const {
+    std::lock_guard lock(mutex_);
+    return waiting_click_ || calculating_;
 }
 
 void LargeMapRadar::processSingleFrame(int player_x, int player_y) {
@@ -184,21 +197,55 @@ void LargeMapRadar::processSingleFrame(int player_x, int player_y) {
     for (const auto& color : colors) {
         cv::Mat mask;
         cv::inRange(hsv, color.lower_hsv, color.upper_hsv, mask);
-        double best_score = 0.0;
-        cv::Point2d best{-1.0, -1.0};
-        for (const auto& tpl : point_templates_) {
-            if (tpl.empty() || tpl.rows > mask.rows || tpl.cols > mask.cols) {
+        cv::Mat search;
+        cv::dilate(mask, search, kernel_, {-1, -1}, 1);
+        std::vector<std::vector<cv::Point>> contours;
+        cv::findContours(search, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+        std::vector<cv::Rect> candidates;
+        candidates.reserve(contours.size());
+        const int max_w = std::max(8, max_tpl_w_ * 4);
+        const int max_h = std::max(8, max_tpl_h_ * 4);
+        const int target_area = std::max(1, max_tpl_w_ * max_tpl_h_);
+        for (const auto& contour : contours) {
+            const cv::Rect bound = cv::boundingRect(contour);
+            if (bound.area() < 4 || bound.width > max_w || bound.height > max_h) {
                 continue;
             }
-            cv::Mat res;
-            cv::matchTemplate(mask, tpl, res, cv::TM_CCOEFF_NORMED);
-            double max_val = 0.0;
-            cv::Point max_loc;
-            cv::minMaxLoc(res, nullptr, &max_val, nullptr, &max_loc);
-            if (std::isfinite(max_val) && max_val >= 0.70 && max_val > best_score) {
-                best_score = max_val;
-                best = cv::Point2d(max_loc.x + tpl.cols / 2.0,
-                                   static_cast<double>(max_loc.y + tpl.rows));
+            candidates.push_back(bound);
+        }
+        std::sort(candidates.begin(), candidates.end(), [target_area](const cv::Rect& a, const cv::Rect& b) {
+            return std::abs(a.area() - target_area) < std::abs(b.area() - target_area);
+        });
+        if (candidates.size() > 24) {
+            candidates.resize(24);
+        }
+        double best_score = 0.0;
+        cv::Point2d best{-1.0, -1.0};
+        for (const auto& bound : candidates) {
+            if (cancel_requested_) {
+                std::lock_guard lock(mutex_);
+                calculating_ = false;
+                return;
+            }
+            const int x1 = std::max(0, bound.x - max_tpl_w_);
+            const int y1 = std::max(0, bound.y - max_tpl_h_);
+            const int x2 = std::min(mask.cols, bound.x + bound.width + max_tpl_w_);
+            const int y2 = std::min(mask.rows, bound.y + bound.height + max_tpl_h_);
+            const cv::Mat roi = mask(cv::Rect(x1, y1, x2 - x1, y2 - y1));
+            for (const auto& tpl : point_templates_) {
+                if (tpl.empty() || tpl.rows > roi.rows || tpl.cols > roi.cols) {
+                    continue;
+                }
+                cv::Mat res;
+                cv::matchTemplate(roi, tpl, res, cv::TM_CCOEFF_NORMED);
+                double max_val = 0.0;
+                cv::Point max_loc;
+                cv::minMaxLoc(res, nullptr, &max_val, nullptr, &max_loc);
+                if (std::isfinite(max_val) && max_val >= 0.70 && max_val > best_score) {
+                    best_score = max_val;
+                    best = cv::Point2d(x1 + max_loc.x + tpl.cols / 2.0,
+                                       static_cast<double>(y1 + max_loc.y + tpl.rows));
+                }
             }
         }
         if (best.x >= 0) {
@@ -245,24 +292,6 @@ void LargeMapRadar::renderHud(const std::string& prompt) {
         cmds.push_back({OverlayCommand::Type::TextCenter, layout.x, layout.large_y,
                         layout.x + layout.total_w, layout.large_y + layout.box_h,
                         0, prompt, hexToBgr("#FFFFFF"), 1, 12, 255});
-    } else {
-        int i = 0;
-        for (const auto& color : colors) {
-            const double dist = distances.count(color.name) ? distances[color.name] : 0.0;
-            auto bgr = hexToBgr(color.hex);
-            const double bx = layout.x + i * (layout.box_w + layout.spacing);
-            const double by = layout.large_y;
-            const bool valid = dist > 0.0;
-            const std::string text = valid ? std::to_string(static_cast<int>(std::round(dist))) + "m" : "---";
-            cmds.push_back({OverlayCommand::Type::RoundedRect, bx, by, bx + layout.box_w, by + layout.box_h,
-                            10, "", bgr, 0, 18, valid ? 179 : 51});
-            cmds.push_back({OverlayCommand::Type::RoundedRect, bx, by, bx + layout.box_w, by + layout.box_h,
-                            10, "", bgr, 2, 18, 204});
-            cmds.push_back({OverlayCommand::Type::TextCenter, bx, by, bx + layout.box_w, by + layout.box_h,
-                            0, text, valid ? hexToBgr("#FFFFFF") : hexToBgr("#FFFFFF"), 1, valid ? 14 : 13, 255});
-            ++i;
-            if (i >= 4) break;
-        }
     }
     overlay_.setCommands(std::move(cmds));
     overlay_.pumpMessages();

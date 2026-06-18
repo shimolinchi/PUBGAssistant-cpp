@@ -15,6 +15,7 @@
 #include <QVBoxLayout>
 
 #include <algorithm>
+#include <filesystem>
 #include <tuple>
 #include <utility>
 
@@ -34,6 +35,13 @@ MainWindow* MainWindow::s_capture_window_ = nullptr;
 #endif
 
 namespace {
+
+QIcon appIconFromPath(const std::filesystem::path& icon_path) {
+    if (!std::filesystem::exists(icon_path)) {
+        return {};
+    }
+    return QIcon(QString::fromStdWString(icon_path.wstring()));
+}
 
 QString functionKeyFromNativeScanCode(quint32 scan_code) {
     switch (scan_code) {
@@ -168,9 +176,10 @@ MainWindow::MainWindow(Config& config,
 
 void MainWindow::buildUi() {
     setWindowTitle(QStringLiteral("PUBG 战术助手"));
-    const auto icon_path = config_.paths().iconFile();
-    if (std::filesystem::exists(icon_path)) {
-        setWindowIcon(QIcon(QString::fromStdString(icon_path.string())));
+    const QIcon app_icon = appIconFromPath(config_.paths().iconFile());
+    if (!app_icon.isNull()) {
+        QApplication::setWindowIcon(app_icon);
+        setWindowIcon(app_icon);
     }
     setFixedSize(280, 372);
     setWindowFlags(Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint);
@@ -201,9 +210,30 @@ void MainWindow::buildUi() {
     buildKeyTab(addTab(QStringLiteral("按键设置")));
     selectTab(0);
     QTimer::singleShot(0, this, [this] {
+        applyNativeWindowIcon();
         applyNativeRoundedRegion();
         applyCaptureExclusion();
     });
+}
+
+void MainWindow::applyNativeWindowIcon() {
+#ifdef _WIN32
+    HWND hwnd = reinterpret_cast<HWND>(winId());
+    if (!hwnd) return;
+    const auto icon_path = config_.paths().iconFile();
+    if (!std::filesystem::exists(icon_path)) return;
+    const auto wide_path = icon_path.wstring();
+    HICON big_icon = static_cast<HICON>(LoadImageW(nullptr, wide_path.c_str(), IMAGE_ICON,
+        GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON), LR_LOADFROMFILE));
+    HICON small_icon = static_cast<HICON>(LoadImageW(nullptr, wide_path.c_str(), IMAGE_ICON,
+        GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_LOADFROMFILE));
+    if (big_icon) {
+        SendMessageW(hwnd, WM_SETICON, ICON_BIG, reinterpret_cast<LPARAM>(big_icon));
+    }
+    if (small_icon) {
+        SendMessageW(hwnd, WM_SETICON, ICON_SMALL, reinterpret_cast<LPARAM>(small_icon));
+    }
+#endif
 }
 
 void MainWindow::applyNativeRoundedRegion() {
@@ -236,8 +266,16 @@ void MainWindow::buildTitleBar(QWidget* root) {
     auto* bar = new QWidget(root);
     bar->setObjectName("titlebar");
     bar->setGeometry(1, 1, 278, 30);
+    const QIcon app_icon = windowIcon();
+    const int title_x = app_icon.isNull() ? 10 : 30;
+    if (!app_icon.isNull()) {
+        auto* icon = new QLabel(bar);
+        icon->setGeometry(10, 7, 16, 16);
+        icon->setPixmap(app_icon.pixmap(16, 16));
+        icon->setScaledContents(true);
+    }
     auto* title = new QLabel(QStringLiteral("PUBG 战术助手"), bar);
-    title->setGeometry(10, 2, 128, 25);
+    title->setGeometry(title_x, 2, 150, 25);
     title->setStyleSheet("color:#111827;font-family:'Microsoft YaHei';font-size:13px;font-weight:700;");
 
     auto* close = new QPushButton(bar);
@@ -299,11 +337,6 @@ void MainWindow::setDisplayState(bool enabled) {
     if (btn_display_) {
         btn_display_->setActive(enabled);
         btn_display_->setText(enabled ? QStringLiteral("关闭瞄准辅助") : QStringLiteral("开启瞄准辅助"));
-    }
-    if (!enabled) {
-        for (auto* button : assistant_buttons_) {
-            button->setActive(false);
-        }
     }
 }
 
@@ -417,7 +450,7 @@ void MainWindow::buildLaunchTab(QWidget* tab) {
     connect(rw, &QPushButton::clicked, this, &MainWindow::openRecoilDebugger);
     auto* lab = new QLabel(QStringLiteral("--启用特殊武器助手--"), tab);
     lab->setAlignment(Qt::AlignCenter);
-    lab->setGeometry(92, 164, 78, 25);
+    lab->setGeometry(3, 164, 256, 25);
     lab->setStyleSheet("color:#6B7280;font-family:'Microsoft YaHei';font-size:13px;font-weight:700;");
     QStringList names{QStringLiteral("迫击炮"), QStringLiteral("火箭筒"), QStringLiteral("投掷物"), "VSS", QStringLiteral("十字弩"), "C4"};
     QStringList keys{"mortar", "rocket", "throwables", "vss", "crossbow", "c4"};
@@ -425,6 +458,7 @@ void MainWindow::buildLaunchTab(QWidget* tab) {
         auto* b = new RoundedButton(names[i], tab);
         b->configure(126, 29, 12, 14);
         b->setToggleMode(true);
+        b->setActive(true);
         b->setGeometry(3 + (i % 2) * 130, 198 + (i / 2) * 35, 126, 29);
         assistant_buttons_[keys[i]] = b;
         connect(b, &QPushButton::clicked, this, [this, key = keys[i]] { toggleAssistant(key); });
@@ -604,10 +638,6 @@ void MainWindow::toggleRecoil() {
 
 void MainWindow::toggleAssistant(const QString& key) {
     bool active = assistant_buttons_[key]->active();
-    if (!display_enabled_) {
-        assistant_buttons_[key]->setActive(false);
-        active = false;
-    }
     if (callbacks_.set_assistant) {
         callbacks_.set_assistant(key.toStdString(), active);
         return;
