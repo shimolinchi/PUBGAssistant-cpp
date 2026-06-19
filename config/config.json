@@ -132,7 +132,7 @@
         "marker_next": "<down>",
         "marker_prev": "<up>",
         "measure_map": "<f4>",
-        "mortar_auto_aim": "<f6>",
+        "mortar_auto_aim": "mouse_right",
         "throw": "b",
         "toggle_display": "<f2>",
         "toggle_equipment": "<enter>",
@@ -453,6 +453,12 @@
             "left": 1430,
             "top": 593,
             "width": 457
+        },
+        "mortar_mount_region": {
+            "height": 34,
+            "left": 1291,
+            "top": 806,
+            "width": 34
         },
         "scope_top_edge_4x_region": {
             "height": 125,

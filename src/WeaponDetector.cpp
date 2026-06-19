@@ -108,7 +108,7 @@ std::pair<std::string, double> WeaponDetector::identifyOnce(ScreenCapture& captu
             best = tpl.name;
         }
     }
-    const double th = best == "Grenade" ? 0.6 : threshold_;
+    const double th = best == "Grenade" ? 0.70 : threshold_;
     if (!best.empty() && best_score >= th) {
         return {best, best_score};
     }

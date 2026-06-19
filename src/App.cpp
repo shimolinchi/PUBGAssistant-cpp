@@ -67,7 +67,7 @@ App::App()
     PUBG_HEAP_PROBE("ctor.afterSpecial");
     map_points_ = std::make_unique<MapPointAssistant>(config_, *regions_);
     PUBG_HEAP_PROBE("ctor.afterMapPoints");
-    mortar_auto_aim_ = std::make_unique<MortarAutoAim>(config_, *minimap_, *large_map_, *elevation_,
+    mortar_auto_aim_ = std::make_unique<MortarAutoAim>(config_, *regions_, *minimap_, *large_map_, *elevation_,
         [this](const std::string& message, const std::string& marker_color) {
         if (status_hud_) {
             const auto hex = config_.markerHex();
@@ -76,6 +76,8 @@ App::App()
         }
     });
     PUBG_HEAP_PROBE("ctor.afterMortarAutoAim");
+    mortar_mount_detector_ = std::make_unique<MortarMountDetector>(config_, *regions_);
+    PUBG_HEAP_PROBE("ctor.afterMortarMountDetector");
     throwables_ = std::make_unique<ThrowablesAssistant>(config_, *regions_, *minimap_);
     PUBG_HEAP_PROBE("ctor.afterThrowables");
     c4_ = std::make_unique<C4Assistant>(config_, *regions_, *minimap_);
@@ -131,13 +133,32 @@ void App::registerHotkeys() {
 #if PUBG_ENABLE_INPUT_CONTROL
     hotkeys_.addHotkey("toggle_recoil", hotkeyCombo("toggle_recoil", "<f3>"), [this] { toggleRecoil(); });
 #endif
-    hotkeys_.addHotkey("toggle_display_n", InputController::parseVirtualKey("n"), [this] { toggleDisplay(); });
     hotkeys_.addHotkey("measure_map", hotkeyCombo("measure_map", "<f4>"), [this] {
         large_map_->toggleMode();
     });
-    hotkeys_.addHotkey("mortar_auto_aim", hotkeyCombo("mortar_auto_aim", "<f6>"), [this] {
-        if (!mortar_auto_aim_) return;
-        mortar_auto_aim_->trigger(currentMarkerColor());
+    hotkeys_.addStateWatcher("mortar_auto_aim", hotkeyVk("mortar_auto_aim", "mouse_right"), [this](bool pressed) {
+        static std::atomic_uint64_t hold_session{0};
+        const auto session = ++hold_session;
+        if (!pressed) {
+            return;
+        }
+        const int hold_ms = config_.read([](const Json& data) {
+            return data.value("mortar_config", Json::object()).value("direction_auto_aim_hold_ms", 180);
+        });
+        std::thread([this, session, hold_ms] {
+            std::this_thread::sleep_for(std::chrono::milliseconds(std::max(0, hold_ms)));
+            if (session != hold_session.load()) {
+                return;
+            }
+            bool can_trigger = false;
+            {
+                std::lock_guard lock(state_mutex_);
+                can_trigger = display_enabled_ && mortar_mounted_;
+            }
+            if (can_trigger && mortar_auto_aim_) {
+                mortar_auto_aim_->trigger(currentMarkerColor());
+            }
+        }).detach();
     });
     hotkeys_.addHotkey("toggle_window", hotkeyCombo("toggle_window", "<home>"), [this] {
         if (main_window_) {
@@ -246,6 +267,12 @@ void App::registerHotkeys() {
             map_points_->setEnabled(false);
         }
     });
+    hotkeys_.addStateWatcher("mortar_interact", InputController::parseVirtualKey("f"), [this](bool pressed) {
+        handleMortarInteractKey(pressed);
+    });
+    hotkeys_.addStateWatcher("manual_game_minimap", InputController::parseVirtualKey("n"), [this](bool pressed) {
+        handleManualGameMinimapToggle(pressed);
+    });
     hotkeys_.addStateWatcher("alt", VK_MENU, [this](bool pressed) {
         std::lock_guard lock(state_mutex_);
         alt_pressed_ = pressed;
@@ -273,6 +300,8 @@ void App::shutdown() {
     }
     PUBG_HEAP_PROBE("shutdown.enter");
     hotkeys_.stop();
+    ++mortar_mount_session_;
+    joinMortarMountWorker();
     std::lock_guard control_lock(control_mutex_);
     equipment_detector_->setEnabled(false);
     weapon_detector_->setEnabled(false);
@@ -291,6 +320,7 @@ void App::shutdown() {
     c4_.reset();
     throwables_.reset();
     mortar_auto_aim_.reset();
+    mortar_mount_detector_.reset();
     special_.reset();
     large_map_.reset();
     map_points_.reset();
@@ -347,6 +377,7 @@ void App::migrateLegacyDefaultHotkeys() {
         {"toggle_display", {"<ctrl>+<shift>+<space>"}, "<f2>"},
         {"toggle_recoil", {"<ctrl>+<shift>+<tab>"}, "<f3>"},
         {"measure_map", {"<f1>", "<ctrl>+<shift>+m"}, "<f4>"},
+        {"mortar_auto_aim", {"<f6>"}, "mouse_right"},
     };
     bool changed = false;
     config_.write([&](Json& data) {
@@ -369,7 +400,7 @@ void App::migrateLegacyDefaultHotkeys() {
             changed = true;
         }
         if (!hotkeys.contains("mortar_auto_aim") || !hotkeys["mortar_auto_aim"].is_string()) {
-            hotkeys["mortar_auto_aim"] = "<f6>";
+            hotkeys["mortar_auto_aim"] = "mouse_right";
             changed = true;
         }
         if (hotkeys.value("fire_key", std::string("end")) == hotkeys.value("toggle_window", std::string("<home>"))) {
@@ -418,23 +449,27 @@ void App::setWeaponDetectionEnabled(bool enabled) {
 
 void App::setDisplayEnabled(bool enabled) {
     std::lock_guard control_lock(control_mutex_);
+    std::string current_weapon;
     {
         std::lock_guard lock(state_mutex_);
         display_enabled_ = enabled;
+        current_weapon = current_weapon_;
+        if (!enabled) {
+            special_display_active_ = false;
+        }
     }
     if (main_window_) {
         QMetaObject::invokeMethod(main_window_, [this, enabled] { main_window_->setDisplayState(enabled); }, Qt::QueuedConnection);
     }
-    minimap_->setEnabled(enabled);
-    minimap_->setDisplay(enabled);
-    elevation_->setEnabled(enabled);
-    elevation_->setDisplay(enabled);
-    large_map_->setDisplay(enabled);
-    special_->setDisplayEnabled(enabled);
     if (!enabled) {
+        closeGameMinimapForAssist();
+        setSpecialDisplayActive(false);
         map_points_->setEnabled(false);
         throwables_->setEnabled(false);
         c4_->setEnabled(false);
+        setMortarMounted(false);
+    } else {
+        updateSpecialWeaponMinimapState("", current_weapon);
     }
     updateAssistantRouting();
     updateStatusHud();
@@ -518,11 +553,23 @@ void App::updateWeaponFromDetectors(const std::string& weapon, double score) {
 
 void App::applyWeaponUpdate(const std::string& weapon, double score) {
     bool recoil_enabled = false;
+    std::string previous_weapon;
+    bool ignore_empty_special_jitter = false;
     {
         std::lock_guard lock(state_mutex_);
-        current_weapon_ = weapon;
-        recoil_enabled = recoil_enabled_;
+        previous_weapon = current_weapon_;
+        ignore_empty_special_jitter = weapon.empty() && special_display_active_ &&
+                                      shouldAutoUseMinimapForWeapon(previous_weapon);
+        if (!ignore_empty_special_jitter) {
+            current_weapon_ = weapon;
+            recoil_enabled = recoil_enabled_;
+        }
         pending_weapon_update_.reset();
+    }
+    if (ignore_empty_special_jitter) {
+        std::cout << "[weapon] ignore empty special jitter after " << previous_weapon
+                  << " score=" << score << "\n";
+        return;
     }
     if (isRecoilWeapon(weapon)) {
         recoil_->updateCurrentWeapon(weapon);
@@ -539,6 +586,7 @@ void App::applyWeaponUpdate(const std::string& weapon, double score) {
     if (!weapon.empty()) {
         map_points_->setEnabled(false);
     }
+    updateSpecialWeaponMinimapState(previous_weapon, weapon);
     updateAssistantRouting();
     if (status_hud_) {
         status_hud_->setCurrentWeapon(weapon);
@@ -580,7 +628,8 @@ void App::updateEquipment(const std::map<int, WeaponSlotInfo>& equipment_slots) 
 
 bool App::isRecoilWeapon(const std::string& weapon) const {
     return !weapon.empty() && weapon != "Rocket" && weapon != "Grenade" &&
-           weapon != "VSS" && weapon != "Crossbow" && weapon != "C4";
+           weapon != "VSS" && weapon != "Crossbow" && weapon != "C4" &&
+           weapon != "Mortar";
 }
 
 void App::syncRecoilAttachmentsForCurrentWeapon() {
@@ -611,11 +660,375 @@ void App::syncRecoilAttachmentsForCurrentWeapon() {
 
 void App::setAssistantEnabled(const std::string& key, bool enabled) {
     std::lock_guard control_lock(control_mutex_);
+    std::string current_weapon;
+    bool disabling_mortar = false;
     {
         std::lock_guard lock(state_mutex_);
         assistant_enabled_[key] = enabled;
+        current_weapon = current_weapon_;
+        if (key == "mortar" && !enabled) {
+            mortar_mounted_ = false;
+            ++mortar_mount_session_;
+            disabling_mortar = true;
+        }
+    }
+    if (disabling_mortar) {
+        closeGameMinimapForAssist();
+        if (!shouldAutoUseMinimapForWeapon(current_weapon)) {
+            setSpecialDisplayActive(false);
+        }
+    }
+    updateSpecialWeaponMinimapState(current_weapon, current_weapon);
+    updateAssistantRouting();
+}
+
+bool App::shouldAutoUseMinimapForWeapon(const std::string& weapon) const {
+    return weapon == "Rocket" || weapon == "Grenade" || weapon == "VSS" ||
+           weapon == "Crossbow" || weapon == "C4" || weapon == "Mortar";
+}
+
+bool App::shouldRunSpecialAssistantsForWeapon(const std::string& weapon) const {
+    return shouldAutoUseMinimapForWeapon(weapon);
+}
+
+void App::toggleGameMinimap() {
+    const int vk = InputController::parseVirtualKey("n");
+    InputController::keyDown(vk);
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    InputController::keyUp(vk);
+}
+
+void App::openGameMinimapForAssist() {
+    bool should_toggle = false;
+    {
+        std::lock_guard lock(state_mutex_);
+        should_toggle = !game_minimap_opened_by_app_;
+        game_minimap_opened_by_app_ = true;
+    }
+    if (should_toggle) {
+        toggleGameMinimap();
+    }
+}
+
+void App::closeGameMinimapForAssist() {
+    bool should_toggle = false;
+    {
+        std::lock_guard lock(state_mutex_);
+        should_toggle = game_minimap_opened_by_app_;
+        game_minimap_opened_by_app_ = false;
+    }
+    if (should_toggle) {
+        toggleGameMinimap();
+    }
+}
+
+void App::handleManualGameMinimapToggle(bool pressed) {
+    if (!pressed) {
+        return;
+    }
+    bool should_close_assist_display = false;
+    bool should_open_assist_display = false;
+    bool weapon_detection_enabled = false;
+    std::string current_weapon;
+    {
+        std::lock_guard lock(state_mutex_);
+        if (nowSeconds() < manual_minimap_toggle_ignore_until_) {
+            return;
+        }
+        should_close_assist_display = special_display_active_;
+        weapon_detection_enabled = weapon_detection_enabled_;
+        current_weapon = current_weapon_;
+        if (should_close_assist_display) {
+            game_minimap_opened_by_app_ = false;
+            manual_special_display_suppressed_ = true;
+            manual_minimap_toggle_ignore_until_ = nowSeconds() + 0.35;
+        } else {
+            auto enabledFor = [&](const std::string& key) {
+                auto it = assistant_enabled_.find(key);
+                return it != assistant_enabled_.end() && it->second;
+            };
+            bool current_allowed = false;
+            if (current_weapon_ == "Rocket") current_allowed = enabledFor("rocket");
+            else if (current_weapon_ == "Grenade") current_allowed = enabledFor("throwables");
+            else if (current_weapon_ == "VSS") current_allowed = enabledFor("vss");
+            else if (current_weapon_ == "Crossbow") current_allowed = enabledFor("crossbow");
+            else if (current_weapon_ == "C4") current_allowed = enabledFor("c4");
+            else if (current_weapon_ == "Mortar") current_allowed = enabledFor("mortar") && mortar_mounted_;
+            should_open_assist_display = shouldAutoUseMinimapForWeapon(current_weapon_) && current_allowed;
+            if (should_open_assist_display) {
+                game_minimap_opened_by_app_ = true;
+                manual_special_display_suppressed_ = false;
+                manual_minimap_toggle_ignore_until_ = nowSeconds() + 0.35;
+            } else {
+                game_minimap_opened_by_app_ = false;
+            }
+        }
+    }
+    if (should_close_assist_display) {
+        setSpecialDisplayActive(false);
+        if (weapon_detection_enabled && current_weapon != "Mortar") {
+            weapon_detector_->setEnabled(true);
+        }
+        updateAssistantRouting();
+        updateStatusHud();
+    } else if (should_open_assist_display) {
+        special_->setCurrentWeapon(current_weapon);
+        setSpecialDisplayActive(true);
+        updateAssistantRouting();
+        updateStatusHud();
+    }
+}
+
+void App::setSpecialDisplayActive(bool active) {
+    bool changed = false;
+    {
+        std::lock_guard lock(state_mutex_);
+        changed = special_display_active_ != active;
+        special_display_active_ = active;
+    }
+    minimap_->setEnabled(active);
+    minimap_->setDisplay(active);
+    elevation_->setEnabled(active);
+    elevation_->setDisplay(active);
+    large_map_->setDisplay(active);
+    special_->setDisplayEnabled(active);
+    if (!active) {
+        throwables_->setEnabled(false);
+        c4_->setEnabled(false);
+    }
+    if (changed) {
+        updateAssistantRouting();
+    }
+}
+
+void App::updateSpecialWeaponMinimapState(const std::string& previous_weapon, const std::string& current_weapon) {
+    bool display_enabled = false;
+    bool current_allowed = false;
+    bool previous_special = shouldAutoUseMinimapForWeapon(previous_weapon);
+    bool current_special = shouldAutoUseMinimapForWeapon(current_weapon);
+    bool current_unknown = current_weapon.empty();
+    bool mortar_mounted = false;
+    bool special_display_active = false;
+    bool manual_suppressed = false;
+    {
+        std::lock_guard lock(state_mutex_);
+        display_enabled = display_enabled_;
+        mortar_mounted = mortar_mounted_;
+        special_display_active = special_display_active_;
+        manual_suppressed = manual_special_display_suppressed_;
+        if (!current_special && !current_unknown) {
+            manual_special_display_suppressed_ = false;
+            manual_minimap_toggle_ignore_until_ = 0.0;
+            manual_suppressed = false;
+        }
+        auto enabledFor = [&](const std::string& key) {
+            auto it = assistant_enabled_.find(key);
+            return it != assistant_enabled_.end() && it->second;
+        };
+        if (current_weapon == "Rocket") current_allowed = enabledFor("rocket");
+        else if (current_weapon == "Grenade") current_allowed = enabledFor("throwables");
+        else if (current_weapon == "VSS") current_allowed = enabledFor("vss");
+        else if (current_weapon == "Crossbow") current_allowed = enabledFor("crossbow");
+        else if (current_weapon == "C4") current_allowed = enabledFor("c4");
+        else if (current_weapon == "Mortar") current_allowed = enabledFor("mortar") && mortar_mounted_;
+    }
+
+    if (!display_enabled) {
+        closeGameMinimapForAssist();
+        setSpecialDisplayActive(false);
+        return;
+    }
+
+    if (current_special && current_allowed) {
+        if (manual_suppressed) {
+            return;
+        }
+        if (!special_display_active) {
+            openGameMinimapForAssist();
+        }
+        setSpecialDisplayActive(true);
+        return;
+    }
+
+    if (current_unknown && special_display_active) {
+        return;
+    }
+
+    if (((previous_special && !current_special) || (current_special && !current_allowed)) && !mortar_mounted) {
+        closeGameMinimapForAssist();
+    }
+    if (!mortar_mounted) {
+        setSpecialDisplayActive(false);
+    }
+}
+
+void App::handleMortarInteractKey(bool pressed) {
+    if (!pressed) {
+        return;
+    }
+    bool display_enabled = false;
+    bool mortar_allowed = false;
+    bool mounted = false;
+    bool special_display_active = false;
+    {
+        std::lock_guard lock(state_mutex_);
+        display_enabled = display_enabled_;
+        mortar_allowed = assistant_enabled_["mortar"];
+        mounted = mortar_mounted_;
+        special_display_active = special_display_active_;
+    }
+    if (!display_enabled || !mortar_allowed) {
+        return;
+    }
+    if (mounted || special_display_active) {
+        setMortarMounted(false);
+        return;
+    }
+    startMortarMountConfirmation();
+}
+
+void App::startMortarMountConfirmation() {
+    const std::uint64_t session = ++mortar_mount_session_;
+    joinMortarMountWorker();
+    {
+        std::lock_guard worker_lock(mortar_mount_mutex_);
+        mortar_mount_worker_ = std::thread([this, session] {
+            const double deadline = nowSeconds() + 0.8;
+            bool mounted = false;
+            while (nowSeconds() <= deadline && session == mortar_mount_session_.load()) {
+                bool display_enabled = false;
+                bool mortar_allowed = false;
+                {
+                    std::lock_guard lock(state_mutex_);
+                    display_enabled = display_enabled_;
+                    mortar_allowed = assistant_enabled_["mortar"];
+                }
+                if (!display_enabled || !mortar_allowed || !mortar_mount_detector_) {
+                    break;
+                }
+                if (mortar_mount_detector_->detectMounted()) {
+                    mounted = true;
+                    break;
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(40));
+            }
+            if (session != mortar_mount_session_.load()) {
+                return;
+            }
+            applyMortarMounted(mounted);
+            if (!mounted) {
+                return;
+            }
+
+            int missed_frames = 0;
+            while (session == mortar_mount_session_.load()) {
+                bool display_enabled = false;
+                bool mortar_allowed = false;
+                {
+                    std::lock_guard lock(state_mutex_);
+                    display_enabled = display_enabled_;
+                    mortar_allowed = assistant_enabled_["mortar"];
+                }
+                if (!display_enabled || !mortar_allowed || !mortar_mount_detector_) {
+                    break;
+                }
+                if (mortar_mount_detector_->detectMounted()) {
+                    missed_frames = 0;
+                } else {
+                    ++missed_frames;
+                    if (missed_frames >= 2) {
+                        break;
+                    }
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(80));
+            }
+            if (session == mortar_mount_session_.load()) {
+                applyMortarMounted(false);
+            }
+        });
+    }
+}
+
+void App::setMortarMounted(bool mounted) {
+    ++mortar_mount_session_;
+    joinMortarMountWorker();
+    applyMortarMounted(mounted);
+}
+
+void App::applyMortarMounted(bool mounted) {
+    bool display_enabled = false;
+    bool mortar_allowed = false;
+    std::string current_weapon;
+    bool weapon_detection_enabled = false;
+    bool was_mortar_weapon = false;
+    {
+        std::lock_guard lock(state_mutex_);
+        was_mortar_weapon = current_weapon_ == "Mortar";
+        mortar_mounted_ = mounted;
+        display_enabled = display_enabled_;
+        current_weapon = current_weapon_;
+        weapon_detection_enabled = weapon_detection_enabled_;
+        auto it = assistant_enabled_.find("mortar");
+        mortar_allowed = it != assistant_enabled_.end() && it->second;
+        if (mounted) {
+            current_weapon_ = "Mortar";
+            manual_special_display_suppressed_ = false;
+            manual_minimap_toggle_ignore_until_ = 0.0;
+            pending_weapon_update_.reset();
+        }
+    }
+    if (mounted && display_enabled && mortar_allowed) {
+        weapon_detector_->setEnabled(false);
+        c4_->onWeaponDetected("", 0.0);
+        recoil_->updateCurrentWeapon("");
+        special_->setCurrentWeapon("Mortar");
+        if (status_hud_) {
+            status_hud_->setCurrentWeapon("Mortar");
+        }
+        openGameMinimapForAssist();
+        setSpecialDisplayActive(true);
+    } else if (!mounted && was_mortar_weapon) {
+        {
+            std::lock_guard lock(state_mutex_);
+            current_weapon_.clear();
+            pending_weapon_update_.reset();
+            manual_special_display_suppressed_ = false;
+            manual_minimap_toggle_ignore_until_ = 0.0;
+        }
+        c4_->onWeaponDetected("", 0.0);
+        recoil_->updateCurrentWeapon("");
+        special_->setCurrentWeapon("");
+        if (status_hud_) {
+            status_hud_->setCurrentWeapon("");
+        }
+        closeGameMinimapForAssist();
+        setSpecialDisplayActive(false);
+        if (weapon_detection_enabled) {
+            weapon_detector_->setEnabled(true);
+        }
+    } else if (!mounted && !shouldAutoUseMinimapForWeapon(current_weapon)) {
+        closeGameMinimapForAssist();
+        setSpecialDisplayActive(false);
+        if (weapon_detection_enabled) {
+            weapon_detector_->setEnabled(true);
+        }
     }
     updateAssistantRouting();
+}
+
+void App::joinMortarMountWorker() {
+    std::thread worker;
+    {
+        std::lock_guard worker_lock(mortar_mount_mutex_);
+        if (!mortar_mount_worker_.joinable()) {
+            return;
+        }
+        if (mortar_mount_worker_.get_id() == std::this_thread::get_id()) {
+            return;
+        }
+        worker = std::move(mortar_mount_worker_);
+    }
+    worker.join();
 }
 
 bool App::shouldShowMarkerIndicator() const {
@@ -627,14 +1040,18 @@ void App::updateAssistantRouting() {
     bool display_enabled = false;
     std::string current_weapon;
     std::unordered_map<std::string, bool> assistant_enabled;
+    bool mortar_mounted = false;
+    bool special_display_active = false;
     {
         std::lock_guard lock(state_mutex_);
         display_enabled = display_enabled_;
         current_weapon = current_weapon_;
         assistant_enabled = assistant_enabled_;
+        mortar_mounted = mortar_mounted_;
+        special_display_active = special_display_active_;
     }
 
-    if (!display_enabled) {
+    if (!display_enabled || !special_display_active) {
         special_->setManualEnabled("mortar", false);
         special_->setManualEnabled("rocket", false);
         special_->setManualEnabled("vss", false);
@@ -645,7 +1062,7 @@ void App::updateAssistantRouting() {
         return;
     }
 
-    special_->setManualEnabled("mortar", assistant_enabled["mortar"]);
+    special_->setManualEnabled("mortar", assistant_enabled["mortar"] && mortar_mounted);
     special_->setManualEnabled("rocket", assistant_enabled["rocket"] && current_weapon == "Rocket");
     special_->setManualEnabled("vss", assistant_enabled["vss"] && current_weapon == "VSS");
     special_->setManualEnabled("crossbow", assistant_enabled["crossbow"] && current_weapon == "Crossbow");
@@ -655,7 +1072,7 @@ void App::updateAssistantRouting() {
     throwables_->setEnabled(throwables_on);
     c4_->setEnabled(c4_on);
     if (status_hud_) {
-        status_hud_->setMarkerIndicatorVisible(display_enabled);
+        status_hud_->setMarkerIndicatorVisible(display_enabled && special_display_active);
     }
 }
 

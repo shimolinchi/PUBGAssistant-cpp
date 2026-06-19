@@ -5,6 +5,8 @@
 #include "ElevationRadar.hpp"
 #include "LargeMapRadar.hpp"
 #include "MinimapRadar.hpp"
+#include "RegionManager.hpp"
+#include "ScreenCapture.hpp"
 
 #include <atomic>
 #include <functional>
@@ -19,7 +21,7 @@ class MortarAutoAim {
 public:
     using MessageCallback = std::function<void(const std::string&, const std::string&)>;
 
-    MortarAutoAim(Config& config, MinimapRadar& minimap, LargeMapRadar& large_map,
+    MortarAutoAim(Config& config, RegionManager& regions, MinimapRadar& minimap, LargeMapRadar& large_map,
                   ElevationRadar& elevation, MessageCallback message_callback = {});
     ~MortarAutoAim();
 
@@ -33,16 +35,25 @@ private:
     };
 
     void run(std::string selected_color);
+    void alignDirection(const std::string& selected_color);
+    [[nodiscard]] std::optional<double> selectedMarkerOffset(const std::string& selected_color) const;
     [[nodiscard]] std::optional<double> targetDistance(const std::string& selected_color) const;
     [[nodiscard]] std::vector<Step> loadSteps() const;
     [[nodiscard]] int resetHoldMs() const;
     [[nodiscard]] int keyDelayMs() const;
+    [[nodiscard]] int directionMaxMs() const;
+    [[nodiscard]] double directionTolerancePx() const;
+    [[nodiscard]] double directionKp() const;
+    [[nodiscard]] double directionKi() const;
+    [[nodiscard]] double directionKd() const;
+    [[nodiscard]] int directionStepDelayMs() const;
     [[nodiscard]] Step nearestStep(double distance) const;
     static void tapKey(int vk, int delay_ms);
     static void holdKey(int vk, int hold_ms);
     static void wheelDown(int delay_ms);
 
     Config& config_;
+    RegionManager& regions_;
     MinimapRadar& minimap_;
     LargeMapRadar& large_map_;
     ElevationRadar& elevation_;

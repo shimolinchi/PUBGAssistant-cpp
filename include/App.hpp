@@ -8,6 +8,7 @@
 #include "MapPointAssistant.hpp"
 #include "MinimapRadar.hpp"
 #include "MortarAutoAim.hpp"
+#include "MortarMountDetector.hpp"
 #include "RecoilControl.hpp"
 #include "SpecialAssistants.hpp"
 #include "StatusHud.hpp"
@@ -16,6 +17,7 @@
 #include "ui/MainWindow.hpp"
 #include <memory>
 #include <mutex>
+#include <thread>
 
 namespace pubg {
 
@@ -38,7 +40,7 @@ public:
     void toggleRecoil();
     void setAssistantEnabled(const std::string& key, bool enabled);
 
-    // 切换标点颜色，供 Q/E 热键和主窗口状态同步使用。
+    // 切换标点颜色，供标点切换热键和主窗口状态同步使用。
     void cycleMarkerColor(int direction);
     [[nodiscard]] std::string currentMarkerColor() const;
     void reloadHotkeys();
@@ -67,6 +69,19 @@ private:
     void migrateLegacyDefaultHotkeys();
     void updateAssistantRouting();
     void updateStatusHud();
+    void updateSpecialWeaponMinimapState(const std::string& previous_weapon, const std::string& current_weapon);
+    void setSpecialDisplayActive(bool active);
+    bool shouldAutoUseMinimapForWeapon(const std::string& weapon) const;
+    bool shouldRunSpecialAssistantsForWeapon(const std::string& weapon) const;
+    void toggleGameMinimap();
+    void openGameMinimapForAssist();
+    void closeGameMinimapForAssist();
+    void handleManualGameMinimapToggle(bool pressed);
+    void handleMortarInteractKey(bool pressed);
+    void startMortarMountConfirmation();
+    void setMortarMounted(bool mounted);
+    void applyMortarMounted(bool mounted);
+    void joinMortarMountWorker();
     bool shouldShowMarkerIndicator() const;
     bool isRecoilWeapon(const std::string& weapon) const;
     void syncRecoilAttachmentsForCurrentWeapon();
@@ -87,6 +102,7 @@ private:
     std::unique_ptr<SpecialAssistants> special_;
     std::unique_ptr<MapPointAssistant> map_points_;
     std::unique_ptr<MortarAutoAim> mortar_auto_aim_;
+    std::unique_ptr<MortarMountDetector> mortar_mount_detector_;
     std::unique_ptr<ThrowablesAssistant> throwables_;
     std::unique_ptr<C4Assistant> c4_;
     std::unique_ptr<StatusHud> status_hud_;
@@ -97,12 +113,20 @@ private:
     mutable std::mutex state_mutex_;
     bool weapon_detection_enabled_ = false;
     bool display_enabled_ = false;
+    bool special_display_active_ = false;
     bool recoil_enabled_ = false;
     std::string current_weapon_;
     bool left_pressed_ = false;
     bool middle_pressed_ = false;
     bool right_pressed_ = false;
     bool alt_pressed_ = false;
+    bool mortar_mounted_ = false;
+    bool game_minimap_opened_by_app_ = false;
+    bool manual_special_display_suppressed_ = false;
+    double manual_minimap_toggle_ignore_until_ = 0.0;
+    std::atomic_uint64_t mortar_mount_session_{0};
+    std::mutex mortar_mount_mutex_;
+    std::thread mortar_mount_worker_;
     std::vector<std::string> marker_color_order_{"Yellow", "Orange", "Blue", "Green"};
     std::string current_marker_color_ = "Yellow";
     std::map<int, WeaponSlotInfo> equipment_;

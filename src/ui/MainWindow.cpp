@@ -469,14 +469,14 @@ void MainWindow::buildCalibrationTab(QWidget* tab) {
     tab->setFixedSize(262, 299);
     auto square_keys = QSet<QString>{
         "minimap_region", "largemap_region",
-        "weapon1_number_region", "weapon2_number_region",
+        "weapon1_number_region", "weapon2_number_region", "mortar_mount_region",
         "weapon1_scope_region", "weapon1_grip_region", "weapon1_muzzle_region", "weapon1_stock_region",
         "weapon2_scope_region", "weapon2_grip_region", "weapon2_muzzle_region", "weapon2_stock_region",
     };
     auto add = [&](const QString& name, const QString& key, bool scale, int row, int col) {
         auto* b = new RoundedButton(name, tab);
-        b->configure(82, 33, 12, 13);
-        b->setGeometry(2 + col * 87 + (col == 2 ? 1 : 0), 41 + (row - 1) * 37, 82, 33);
+        b->configure(82, 29, 12, 12);
+        b->setGeometry(2 + col * 87 + (col == 2 ? 1 : 0), 39 + (row - 1) * 32, 82, 29);
         connect(b, &QPushButton::clicked, this, [this, key, scale, square_keys] {
             auto* ov = new RegionCalibrationOverlay(regions_, key, scale ? RegionCalibrationOverlay::Mode::Scale : RegionCalibrationOverlay::Mode::Region, square_keys.contains(key));
             if (debug_overlay_.created()) {
@@ -512,6 +512,7 @@ void MainWindow::buildCalibrationTab(QWidget* tab) {
         {{QStringLiteral("武器1枪口"), false, "weapon1_muzzle_region"}, {QStringLiteral("武器2枪口"), false, "weapon2_muzzle_region"}, {QStringLiteral("四倍镜内边"), false, "scope_top_edge_4x_region"}},
         {{QStringLiteral("武器1握把"), false, "weapon1_grip_region"}, {QStringLiteral("武器2握把"), false, "weapon2_grip_region"}, {QStringLiteral("六倍镜内边"), false, "scope_top_edge_6x_region"}},
         {{QStringLiteral("武器1枪托"), false, "weapon1_stock_region"}, {QStringLiteral("武器2枪托"), false, "weapon2_stock_region"}, {QStringLiteral("八倍镜内边"), false, "scope_top_edge_8x_region"}},
+        {{QStringLiteral("迫击炮上炮"), false, "mortar_mount_region"}},
     };
     for (int r = 0; r < rows.size(); ++r) {
         for (int c = 0; c < rows[r].size(); ++c) {
@@ -575,7 +576,7 @@ void MainWindow::buildKeyTab(QWidget* tab) {
             connect(next_btn, &QPushButton::clicked, this, [this] { beginCaptureHotkey("marker_next"); });
         } else {
             const std::string fallback = action == "fire_key" ? "end"
-                : action == "mortar_auto_aim" ? "<f6>"
+                : action == "mortar_auto_aim" ? "mouse_right"
                 : action == "toggle_window" ? "<home>"
                 : "";
             const QString display = editable
@@ -939,7 +940,7 @@ void MainWindow::resetDefaultHotkeys() {
             {"toggle_display", "<f2>"},
             {"toggle_recoil", "<f3>"},
             {"measure_map", "<f4>"},
-            {"mortar_auto_aim", "<f6>"},
+            {"mortar_auto_aim", "mouse_right"},
             {"marker_prev", "<up>"},
             {"marker_next", "<down>"},
             {"toggle_equipment", "tab"},

@@ -134,6 +134,13 @@
     ],
     "auto_aim_key_delay_ms": 3,
     "auto_aim_reset_w_hold_ms": 1500,
+    "direction_auto_aim_hold_ms": 180,
+    "direction_auto_aim_kd": 0.012,
+    "direction_auto_aim_ki": 0.0,
+    "direction_auto_aim_kp": 0.045,
+    "direction_auto_aim_max_ms": 1800,
+    "direction_auto_aim_step_delay_ms": 12,
+    "direction_auto_aim_tolerance_px": 4.0,
     "b_param": 4.5,
     "fpp_dists": [
       30.67,

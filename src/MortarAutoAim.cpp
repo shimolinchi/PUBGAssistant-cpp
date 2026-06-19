@@ -9,9 +9,9 @@
 
 namespace pubg {
 
-MortarAutoAim::MortarAutoAim(Config& config, MinimapRadar& minimap, LargeMapRadar& large_map,
+MortarAutoAim::MortarAutoAim(Config& config, RegionManager& regions, MinimapRadar& minimap, LargeMapRadar& large_map,
                              ElevationRadar& elevation, MessageCallback message_callback)
-    : config_(config), minimap_(minimap), large_map_(large_map), elevation_(elevation),
+    : config_(config), regions_(regions), minimap_(minimap), large_map_(large_map), elevation_(elevation),
       ballistics_(config), message_callback_(std::move(message_callback)) {}
 
 MortarAutoAim::~MortarAutoAim() {
@@ -104,6 +104,42 @@ int MortarAutoAim::keyDelayMs() const {
     });
 }
 
+int MortarAutoAim::directionMaxMs() const {
+    return config_.read([](const Json& data) {
+        return data.value("mortar_config", Json::object()).value("direction_auto_aim_max_ms", 1800);
+    });
+}
+
+double MortarAutoAim::directionTolerancePx() const {
+    return config_.read([](const Json& data) {
+        return data.value("mortar_config", Json::object()).value("direction_auto_aim_tolerance_px", 4.0);
+    });
+}
+
+double MortarAutoAim::directionKp() const {
+    return config_.read([](const Json& data) {
+        return data.value("mortar_config", Json::object()).value("direction_auto_aim_kp", 0.045);
+    });
+}
+
+double MortarAutoAim::directionKi() const {
+    return config_.read([](const Json& data) {
+        return data.value("mortar_config", Json::object()).value("direction_auto_aim_ki", 0.0);
+    });
+}
+
+double MortarAutoAim::directionKd() const {
+    return config_.read([](const Json& data) {
+        return data.value("mortar_config", Json::object()).value("direction_auto_aim_kd", 0.012);
+    });
+}
+
+int MortarAutoAim::directionStepDelayMs() const {
+    return config_.read([](const Json& data) {
+        return data.value("mortar_config", Json::object()).value("direction_auto_aim_step_delay_ms", 12);
+    });
+}
+
 MortarAutoAim::Step MortarAutoAim::nearestStep(double distance) const {
     const auto steps = loadSteps();
     return *std::min_element(steps.begin(), steps.end(), [distance](const Step& a, const Step& b) {
@@ -127,6 +163,94 @@ void MortarAutoAim::holdKey(int vk, int hold_ms) {
 void MortarAutoAim::wheelDown(int delay_ms) {
     InputController::mouseWheel(-1);
     std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms));
+}
+
+std::optional<double> MortarAutoAim::selectedMarkerOffset(const std::string& selected_color) const {
+    const auto rect = regions_.getRealRegion("compass_region");
+    if (!rect || !rect->valid()) {
+        return std::nullopt;
+    }
+    const auto colors = config_.markerColors();
+    auto color_it = std::find_if(colors.begin(), colors.end(), [&](const MarkerColor& c) {
+        return c.name == selected_color;
+    });
+    if (color_it == colors.end()) {
+        return std::nullopt;
+    }
+
+    ScreenCapture capture;
+    cv::Mat bgr = capture.grabBgr(*rect);
+    if (bgr.empty()) {
+        return std::nullopt;
+    }
+    cv::Mat hsv;
+    cv::cvtColor(bgr, hsv, cv::COLOR_BGR2HSV);
+    cv::Mat mask;
+    cv::inRange(hsv, color_it->lower_hsv, color_it->upper_hsv, mask);
+    cv::morphologyEx(mask, mask, cv::MORPH_OPEN, cv::Mat::ones(2, 2, CV_8U));
+    cv::dilate(mask, mask, cv::Mat::ones(3, 3, CV_8U), {-1, -1}, 1);
+
+    std::vector<std::vector<cv::Point>> contours;
+    cv::findContours(mask, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+    double best_area = 0.0;
+    cv::Rect best_rect;
+    for (const auto& contour : contours) {
+        const double area = cv::contourArea(contour);
+        if (area < 4.0 || area < best_area) {
+            continue;
+        }
+        const cv::Rect bound = cv::boundingRect(contour);
+        if (bound.width > rect->width / 3 || bound.height > rect->height / 2) {
+            continue;
+        }
+        best_area = area;
+        best_rect = bound;
+    }
+    if (best_area <= 0.0) {
+        return std::nullopt;
+    }
+    const double marker_x = best_rect.x + best_rect.width * 0.5;
+    return marker_x - rect->width * 0.5;
+}
+
+void MortarAutoAim::alignDirection(const std::string& selected_color) {
+    const int max_ms = directionMaxMs();
+    const int step_delay = std::max(1, directionStepDelayMs());
+    const double tolerance = directionTolerancePx();
+    const double kp = directionKp();
+    const double ki = directionKi();
+    const double kd = directionKd();
+    const double deadline = nowSeconds() + max_ms / 1000.0;
+    double integral = 0.0;
+    double previous_error = 0.0;
+    double last_time = nowSeconds();
+    bool have_previous = false;
+
+    while (running_ && nowSeconds() < deadline) {
+        const auto offset = selectedMarkerOffset(selected_color);
+        if (!offset) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(step_delay));
+            continue;
+        }
+        const double error = *offset;
+        if (std::abs(error) <= tolerance) {
+            break;
+        }
+        const double now = nowSeconds();
+        const double dt = std::max(0.001, now - last_time);
+        last_time = now;
+        integral = std::clamp(integral + error * dt, -200.0, 200.0);
+        const double derivative = have_previous ? (error - previous_error) / dt : 0.0;
+        previous_error = error;
+        have_previous = true;
+        const double output = kp * error + ki * integral + kd * derivative;
+        int dx = static_cast<int>(std::round(std::clamp(output, -18.0, 18.0)));
+        if (dx == 0) {
+            dx = error > 0 ? 1 : -1;
+        }
+        InputController::moveMouseRelative(dx, 0);
+        std::this_thread::sleep_for(std::chrono::milliseconds(step_delay));
+    }
 }
 
 void MortarAutoAim::run(std::string selected_color) {
@@ -179,6 +303,7 @@ void MortarAutoAim::run(std::string selected_color) {
     for (int i = 0; i < step.presses; ++i) {
         wheelDown(delay);
     }
+    alignDirection(selected_color);
     finish();
 }
 
