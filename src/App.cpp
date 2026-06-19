@@ -153,8 +153,8 @@ void App::registerHotkeys() {
             equipment_detector_->requestEquipmentConfirmation();
         }
     });
-    hotkeys_.addHotkey("marker_prev", hotkeyCombo("marker_prev", "q"), [this] { cycleMarkerColor(-1); });
-    hotkeys_.addHotkey("marker_next", hotkeyCombo("marker_next", "e"), [this] { cycleMarkerColor(1); });
+    hotkeys_.addHotkey("marker_prev", hotkeyCombo("marker_prev", "<up>"), [this] { cycleMarkerColor(-1); });
+    hotkeys_.addHotkey("marker_next", hotkeyCombo("marker_next", "<down>"), [this] { cycleMarkerColor(1); });
     hotkeys_.addStateWatcher("sg_peek_left", InputController::parseVirtualKey("q"), [this](bool pressed) {
         if (pressed && recoil_) {
             recoil_->setSgPeekDirection(1);

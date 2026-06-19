@@ -129,8 +129,8 @@
     },
     "hotkeys": {
         "fire_key": "<f8>",
-        "marker_next": "e",
-        "marker_prev": "q",
+        "marker_next": "<down>",
+        "marker_prev": "<up>",
         "measure_map": "<f4>",
         "mortar_auto_aim": "<f6>",
         "throw": "b",

@@ -557,8 +557,8 @@ void MainWindow::buildKeyTab(QWidget* tab) {
         desc->setGeometry(0, y, 120, 24);
         desc->setStyleSheet("color:#333333;font-family:'Microsoft YaHei';font-size:13px;font-weight:700;");
         if (action == "marker_pair") {
-            auto* prev = new QLabel(formatHotkey(hotkeyValue("marker_prev", "q")), tab);
-            auto* next = new QLabel(formatHotkey(hotkeyValue("marker_next", "e")), tab);
+            auto* prev = new QLabel(formatHotkey(hotkeyValue("marker_prev", "<up>")), tab);
+            auto* next = new QLabel(formatHotkey(hotkeyValue("marker_next", "<down>")), tab);
             prev->setGeometry(value_x, y + 2, 28, 20);
             next->setGeometry(value_x + 68, y + 2, 28, 20);
             prev->setStyleSheet("color:#2563EB;font-family:Consolas;font-size:13px;font-weight:700;");
@@ -940,8 +940,8 @@ void MainWindow::resetDefaultHotkeys() {
             {"toggle_recoil", "<f3>"},
             {"measure_map", "<f4>"},
             {"mortar_auto_aim", "<f6>"},
-            {"marker_prev", "q"},
-            {"marker_next", "e"},
+            {"marker_prev", "<up>"},
+            {"marker_next", "<down>"},
             {"toggle_equipment", "tab"},
             {"fire_key", "end"},
         };
