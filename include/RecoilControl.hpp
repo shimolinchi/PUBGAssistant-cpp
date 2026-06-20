@@ -19,6 +19,7 @@ public:
 
     // 开关压枪位移。关闭时会停止 firing 状态并释放 fire_key。
     void setEnabled(bool enabled);
+    void setFeatureEnabled(const std::string& key, bool enabled);
 
     // 更新当前手持武器。
     // 会从 config.json 中取该武器的 recoil_curve、type、auto_fire 等配置。
@@ -86,6 +87,7 @@ private:
 
     // 基础压枪配置：开火键、每次移动间隔、曲线采样间隔。
     int fire_vk_ = VK_END;
+    int hip_aim_vk_ = VK_RBUTTON;
     double recoil_delay_ = 0.02;
     double recoil_curve_step_ = 0.4;
 
@@ -113,6 +115,10 @@ private:
     double fire_start_ = 0.0;
     int sg_peek_direction_ = 0;
     bool sg_peek_visible_ = false;
+    bool auto_recoil_enabled_ = true;
+    bool dmr_tap_enabled_ = true;
+    bool sr_breath_control_enabled_ = true;
+    bool sg_quick_peek_enabled_ = true;
     std::atomic_bool sg_action_running_{false};
     std::thread sg_action_thread_;
     bool sr_breath_enabled_ = false;

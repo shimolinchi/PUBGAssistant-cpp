@@ -74,6 +74,10 @@ void RecoilControl::loadConfig() {
     if (!fire_vk_) {
         fire_vk_ = VK_END;
     }
+    hip_aim_vk_ = InputController::parseVirtualKey(hotkeys.value("hip_aim_key", "mouse_right"));
+    if (!hip_aim_vk_) {
+        hip_aim_vk_ = VK_RBUTTON;
+    }
     recoil_delay_ = rc.value("recoil_delay", 0.02);
     recoil_curve_step_ = rc.value("recoil_curve_step", 0.4);
     const auto sr_cfg = rc.value("sr_breath_control", Json::object());
@@ -168,6 +172,26 @@ void RecoilControl::setEnabled(bool enabled) {
         InputController::keyUp(fire_vk_);
 #endif
         stopSrBreathTrackingLocked();
+    }
+}
+
+void RecoilControl::setFeatureEnabled(const std::string& key, bool enabled) {
+    std::lock_guard lock(mutex_);
+    if (key == "auto_recoil") {
+        auto_recoil_enabled_ = enabled;
+        if (!enabled) {
+            firing_ = false;
+            fire_start_ = 0.0;
+        }
+    } else if (key == "dmr_tap") {
+        dmr_tap_enabled_ = enabled;
+    } else if (key == "sr_breath") {
+        sr_breath_control_enabled_ = enabled;
+        if (!enabled) {
+            stopSrBreathTrackingLocked();
+        }
+    } else if (key == "sg_peek") {
+        sg_quick_peek_enabled_ = enabled;
     }
 }
 
@@ -275,7 +299,7 @@ void RecoilControl::workerLoop() {
         {
             std::lock_guard lock(mutex_);
             delay_seconds = sr_breath_enabled_ ? sr_track_interval_ : recoil_delay_;
-            if (right && !last_right) {
+            if (right && !last_right && sr_breath_control_enabled_) {
                 if (sr_breath_enabled_) {
                     stopSrBreathTrackingLocked();
                 } else {
@@ -284,18 +308,20 @@ void RecoilControl::workerLoop() {
             }
             if (left && !last_left) {
                 const bool sg_quick_peek = enabled_ && !current_weapon_.empty() &&
-                    weapon_type_ == "sg" && sg_peek_direction_ != 0;
+                    weapon_type_ == "sg" && sg_quick_peek_enabled_ && sg_peek_direction_ != 0;
                 if (sg_quick_peek) {
                     triggerSgQuickPeekShot(sg_peek_direction_);
                 } else {
                     InputController::keyDown(fire_vk_);
                     if (enabled_ && !current_weapon_.empty() && weapon_type_ != "sr") {
                         if (weapon_type_ == "dmr") {
-                            const int strength = static_cast<int>(std::round(calculateStrength(0.0)));
-                            if (strength > 0) {
-                                InputController::moveMouseRelative(0, strength);
+                            if (dmr_tap_enabled_) {
+                                const int strength = static_cast<int>(std::round(calculateStrength(0.0)));
+                                if (strength > 0) {
+                                    InputController::moveMouseRelative(0, strength);
+                                }
                             }
-                        } else {
+                        } else if (auto_recoil_enabled_) {
                             firing_ = true;
                             fire_start_ = nowSeconds();
                         }
@@ -307,7 +333,7 @@ void RecoilControl::workerLoop() {
                 InputController::keyUp(fire_vk_);
             }
 
-            if (enabled_ && firing_ && !current_weapon_.empty() && weapon_type_ != "dmr" && weapon_type_ != "sr") {
+            if (enabled_ && auto_recoil_enabled_ && firing_ && !current_weapon_.empty() && weapon_type_ != "dmr" && weapon_type_ != "sr") {
                 const double t = nowSeconds() - fire_start_;
                 const int strength = static_cast<int>(std::round(calculateStrength(t)));
                 if (auto_fire_) {
@@ -340,13 +366,14 @@ void RecoilControl::triggerSgQuickPeekShot(int direction) {
         return;
     }
     const int fire_vk = fire_vk_;
+    const int hip_aim_vk = hip_aim_vk_;
     if (sg_action_thread_.joinable()) {
         sg_action_thread_.join();
     }
-    sg_action_thread_ = std::thread([this, direction, fire_vk] {
+    sg_action_thread_ = std::thread([this, direction, fire_vk, hip_aim_vk] {
         const int lean_vk = direction == 1 ? 'Q' : 'E';
         const int move_vk = direction == 1 ? 'A' : 'D';
-        InputController::mouseRightDown();
+        InputController::pressVirtualKey(hip_aim_vk);
         std::this_thread::sleep_for(std::chrono::milliseconds(40));
         InputController::keyDown(lean_vk);
         InputController::keyDown(move_vk);
@@ -358,7 +385,7 @@ void RecoilControl::triggerSgQuickPeekShot(int direction) {
         InputController::keyUp(lean_vk);
         InputController::keyUp(move_vk);
         InputController::keyUp(VK_CONTROL);
-        InputController::mouseRightUp();
+        InputController::releaseVirtualKey(hip_aim_vk);
         const int counter_move_vk = direction == 1 ? 'D' : 'A';
         InputController::keyDown(counter_move_vk);
         std::this_thread::sleep_for(std::chrono::milliseconds(35));

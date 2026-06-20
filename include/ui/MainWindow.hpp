@@ -7,6 +7,7 @@
 #include <QMainWindow>
 #include <QMouseEvent>
 #include <QPoint>
+#include <QPointer>
 #include <QStackedWidget>
 #include <QStringList>
 #include <QTimer>
@@ -36,6 +37,8 @@
 namespace pubg::ui {
 
 class ScaleCalibrationWindow;
+class DisplaySettingsWindow;
+class RegionCalibrationOverlay;
 
 // Qt 主窗口，对应 Python main.py 中 TacticalHub 的可见控制台。
 // 目标是还原 280x372 半透明、置顶、无边框、四个选项卡的交互。
@@ -48,6 +51,7 @@ public:
         std::function<void(bool)> set_recoil;
         std::function<void(const std::string&, bool)> set_assistant;
         std::function<void()> sync_marker_colors;
+        std::function<void()> refresh_status_hud;
         std::function<void()> reload_hotkeys;
         std::function<void()> shutdown;
     };
@@ -96,6 +100,7 @@ private:
     // 构建窗口标题栏、tab bar 和四个页面。
     void buildUi();
     void buildTitleBar(QWidget* root);
+    void applyTheme();
     void applyNativeWindowIcon();
     void applyNativeRoundedRegion();
     QWidget* addTab(const QString& title);
@@ -104,6 +109,7 @@ private:
     void buildLaunchTab(QWidget* tab);
     void buildCalibrationTab(QWidget* tab);
     void buildKeyTab(QWidget* tab);
+    void buildHelpTab(QWidget* tab);
 
     // 主窗口按钮回调。
     void toggleWeaponDetection();
@@ -115,9 +121,13 @@ private:
     void selectPntColorMode(const QString& mode);
     void toggleDebugOverlay();
     void drawDebugOverlay();
+    void openRegionCalibrationWindow();
     void openScaleCalibrator();
     void openRecoilDebugger();
     void openSpecialWeaponDebugger();
+    void openDisplaySettingsWindow();
+    void openHotkeySettingsWindow();
+    void openFullHelpWindow();
     void applyCaptureExclusion();
     void beginCaptureHotkey(const QString& action);
     bool captureHotkey(const QString& key, const QStringList& modifiers);
@@ -169,6 +179,13 @@ private:
     QHash<QString, RoundedButton*> assistant_buttons_;
     OverlayWindow debug_overlay_;
     ScaleCalibrationWindow* scale_calibration_window_ = nullptr;
+    DisplaySettingsWindow* display_settings_window_ = nullptr;
+    QPointer<QWidget> region_calibration_window_;
+    QPointer<RegionCalibrationOverlay> region_calibration_overlay_;
+    QPointer<QWidget> recoil_debugger_window_;
+    QPointer<QWidget> special_weapon_debugger_window_;
+    QPointer<QWidget> hotkey_settings_window_;
+    QPointer<QWidget> help_window_;
 };
 
 } // namespace pubg::ui

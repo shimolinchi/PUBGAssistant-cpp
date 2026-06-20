@@ -129,10 +129,13 @@
     },
     "hotkeys": {
         "fire_key": "<f8>",
+        "game_minimap": "n",
+        "hip_aim_key": "mouse_right",
         "marker_next": "<down>",
         "marker_prev": "<up>",
         "measure_map": "<f4>",
         "mortar_auto_aim": "mouse_right",
+        "open_large_map": "m",
         "throw": "b",
         "toggle_display": "<f2>",
         "toggle_equipment": "<enter>",
@@ -430,6 +433,12 @@
         }
     },
     "real_regions": {
+        "compass_region": {
+            "height": 77,
+            "left": 553,
+            "top": 0,
+            "width": 796
+        },
         "crosshair_region": {
             "height": 720,
             "left": 600,

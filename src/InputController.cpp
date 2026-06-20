@@ -75,6 +75,26 @@ void InputController::mouseRightUp() {
 #endif
 }
 
+void InputController::pressVirtualKey(int vk) {
+    if (vk == VK_LBUTTON) {
+        mouseLeftDown();
+    } else if (vk == VK_RBUTTON) {
+        mouseRightDown();
+    } else {
+        keyDown(vk);
+    }
+}
+
+void InputController::releaseVirtualKey(int vk) {
+    if (vk == VK_LBUTTON) {
+        mouseLeftUp();
+    } else if (vk == VK_RBUTTON) {
+        mouseRightUp();
+    } else {
+        keyUp(vk);
+    }
+}
+
 void InputController::mouseWheel(int notches) {
 #ifdef _WIN32
     if (notches == 0) {

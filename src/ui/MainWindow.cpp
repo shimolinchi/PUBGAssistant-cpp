@@ -1,18 +1,26 @@
 #include "ui/MainWindow.hpp"
 
 #include <QGridLayout>
+#include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QIcon>
 #include <QApplication>
 #include <QKeyEvent>
 #include <QFrame>
 #include <QLineEdit>
+#include <QMargins>
 #include <QMouseEvent>
 #include <QPair>
 #include <QPushButton>
+#include <QScreen>
+#include <QScrollArea>
 #include <QSet>
+#include <QDesktopServices>
+#include <QEvent>
 #include <QStringList>
+#include <QTextBrowser>
 #include <QVBoxLayout>
+#include <QUrl>
 
 #include <algorithm>
 #include <filesystem>
@@ -23,6 +31,8 @@
 #include "ui/RegionCalibrationOverlay.hpp"
 #include "ui/ScaleCalibrationWindow.hpp"
 #include "ui/SpecialWeaponDebuggerWindow.hpp"
+#include "ui/DisplaySettingsWindow.hpp"
+#include "ui/Theme.hpp"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -35,6 +45,28 @@ MainWindow* MainWindow::s_capture_window_ = nullptr;
 #endif
 
 namespace {
+
+class ChildGeometryFollower final : public QObject {
+public:
+    ChildGeometryFollower(QWidget* child, QMargins margins, QObject* parent)
+        : QObject(parent), child_(child), margins_(margins) {}
+
+protected:
+    bool eventFilter(QObject* watched, QEvent* event) override {
+        if (event->type() == QEvent::Resize) {
+            if (auto* parent = qobject_cast<QWidget*>(watched); parent && child_) {
+                child_->setGeometry(margins_.left(), margins_.top(),
+                                    std::max(1, parent->width() - margins_.left() - margins_.right()),
+                                    std::max(1, parent->height() - margins_.top() - margins_.bottom()));
+            }
+        }
+        return QObject::eventFilter(watched, event);
+    }
+
+private:
+    QWidget* child_ = nullptr;
+    QMargins margins_;
+};
 
 QIcon appIconFromPath(const std::filesystem::path& icon_path) {
     if (!std::filesystem::exists(icon_path)) {
@@ -183,16 +215,10 @@ void MainWindow::buildUi() {
     }
     setFixedSize(280, 372);
     setWindowFlags(Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint);
-    setWindowOpacity(0.60);
+    setWindowOpacity(themedWindowOpacity(config_));
     setAttribute(Qt::WA_TranslucentBackground, true);
     central_ = new QWidget(this);
     central_->setObjectName("windowFrame");
-    central_->setStyleSheet(
-        "#windowFrame{background:#DDE6F0;border:1px solid #FFFFFF;border-radius:18px;}"
-        "QWidget{background:transparent;border:0;}"
-        "QStackedWidget{background:transparent;border:0;}"
-        "QLabel{background:transparent;border:0;}"
-    );
     setCentralWidget(central_);
 
     buildTitleBar(central_);
@@ -206,14 +232,80 @@ void MainWindow::buildUi() {
 
     buildMapTab(addTab(QStringLiteral("地图点位")));
     buildLaunchTab(addTab(QStringLiteral("启动助手")));
-    buildCalibrationTab(addTab(QStringLiteral("校准区域")));
-    buildKeyTab(addTab(QStringLiteral("按键设置")));
+    buildCalibrationTab(addTab(QStringLiteral("调试校准")));
+    buildHelpTab(addTab(QStringLiteral("使用说明")));
+    applyTheme();
     selectTab(0);
     QTimer::singleShot(0, this, [this] {
         applyNativeWindowIcon();
         applyNativeRoundedRegion();
         applyCaptureExclusion();
     });
+}
+
+void showWindowInsideScreen(QWidget* window) {
+    if (!window) return;
+    window->show();
+
+    QScreen* screen = window->screen();
+    if (!screen) {
+        const QPoint center = window->frameGeometry().center();
+        screen = QGuiApplication::screenAt(center);
+    }
+    if (!screen) {
+        screen = QGuiApplication::primaryScreen();
+    }
+    if (screen) {
+        const QRect available = screen->availableGeometry().adjusted(8, 8, -8, -8);
+        QSize size = window->size();
+        if (size.width() > available.width() || size.height() > available.height()) {
+            size = size.boundedTo(available.size());
+            window->resize(size);
+        }
+        QPoint pos = window->pos();
+        pos.setX(std::clamp(pos.x(), available.left(), std::max(available.left(), available.right() - window->width() + 1)));
+        pos.setY(std::clamp(pos.y(), available.top(), std::max(available.top(), available.bottom() - window->height() + 1)));
+        window->move(pos);
+    }
+
+    window->raise();
+    window->activateWindow();
+}
+
+void MainWindow::applyTheme() {
+    const auto theme = currentUiTheme(config_);
+    setWindowOpacity(themedWindowOpacity(config_));
+    RoundedButton::setThemeColors(theme.button, theme.button_hover, theme.button_pressed,
+                                  theme.button_active, theme.border, theme.button_text);
+    if (central_) {
+        central_->setStyleSheet(QStringLiteral(
+            "#windowFrame{background:%1;border:1px solid %2;border-radius:18px;}"
+            "QWidget{background:transparent;border:0;}"
+            "QStackedWidget{background:transparent;border:0;}"
+            "QLabel{background:transparent;border:0;color:%3;}"
+        ).arg(theme.frame, theme.border, theme.label));
+    }
+    if (pages_) {
+        for (int i = 0; i < pages_->count(); ++i) {
+            if (auto* page = pages_->widget(i)) {
+                page->setStyleSheet(QStringLiteral("background:%1;").arg(theme.page));
+            }
+        }
+    }
+    const auto label_style = QStringLiteral("color:%1;font-family:'Microsoft YaHei';font-size:13px;font-weight:700;").arg(theme.label);
+    const auto value_style = QStringLiteral("color:%1;font-family:Consolas;font-size:13px;font-weight:700;").arg(theme.accent);
+    const auto labels = findChildren<QLabel*>();
+    for (auto* label : labels) {
+        if (!label->styleSheet().contains("Consolas")) {
+            label->setStyleSheet(label_style);
+        } else {
+            label->setStyleSheet(value_style);
+        }
+    }
+    const auto buttons = findChildren<RoundedButton*>();
+    for (auto* button : buttons) {
+        button->update();
+    }
 }
 
 void MainWindow::applyNativeWindowIcon() {
@@ -299,7 +391,6 @@ QWidget* MainWindow::addTab(const QString& title) {
     tab_buttons_.push_back(btn);
     connect(btn, &QPushButton::clicked, this, [this, idx] { selectTab(idx); });
     auto* page = new QWidget(this);
-    page->setStyleSheet("background:#DDE6F0;");
     pages_->addWidget(page);
     return page;
 }
@@ -350,8 +441,11 @@ void MainWindow::setRecoilState(bool enabled) {
 
 void MainWindow::buildMapTab(QWidget* tab) {
     tab->setFixedSize(262, 299);
+    const auto ui_state = config_.read([](const Json& data) {
+        return data.value("ui_state", Json::object());
+    });
     QStringList maps{QStringLiteral("艾伦格"), QStringLiteral("米拉玛"), QStringLiteral("泰戈"), QStringLiteral("荣都"), QStringLiteral("帝斯顿"), QStringLiteral("维寒迪")};
-    QStringList full{QStringLiteral("艾伦格 (Erangel)"), QStringLiteral("米拉玛 (Miramar)"), QStringLiteral("泰戈 (Taego)"), QStringLiteral("荣都 (Rondo)"), QStringLiteral("帝斯顿 (Deston)"), QStringLiteral("维寒迪 (Vikendi)")};
+    QStringList full{QStringLiteral("艾伦格(Erangel)"), QStringLiteral("米拉玛(Miramar)"), QStringLiteral("泰戈 (Taego)"), QStringLiteral("荣都 (Rondo)"), QStringLiteral("帝斯顿(Deston)"), QStringLiteral("维寒迪(Vikendi)")};
     for (int i = 0; i < maps.size(); ++i) {
         auto* b = new RoundedButton(maps[i], tab);
         b->configure((i % 2) ? 128 : 126, 30, 12, 16);
@@ -392,7 +486,8 @@ void MainWindow::buildMapTab(QWidget* tab) {
         {QStringLiteral("蓝色盲"), "tritanopia"},
     };
     const QString current_mode = QString::fromStdString(config_.read([](const Json& data) {
-        return data.value("pnt_color_mode", std::string("normal"));
+        const auto ui = data.value("ui_state", Json::object());
+        return ui.value("pnt_color_mode", data.value("pnt_color_mode", std::string("normal")));
     }));
     for (const auto& mode : modes) {
         auto* b = new RoundedButton(mode.first, mode_frame);
@@ -410,29 +505,38 @@ void MainWindow::buildMapTab(QWidget* tab) {
     group_frame->setGeometry(1, 266, 260, 30);
     QStringList groups{QStringLiteral("载具"), QStringLiteral("飞机"), QStringLiteral("密室"), QStringLiteral("其他")};
     QStringList keys{"vehicles", "planes", "rooms", "other"};
+    const Json category_state = ui_state.value("map_point_categories", Json::object());
     for (int i = 0; i < 4; ++i) {
         auto* b = new RoundedButton(groups[i], group_frame);
         b->configure(61, 30, 12, 13);
         b->setToggleMode(true);
-        b->setActive(true);
+        const bool active = category_state.value(keys[i].toStdString(), true);
+        b->setActive(active);
         b->setGeometry(2 + i * 65, 0, 61, 30);
         group_buttons_[keys[i]] = b;
         const std::string key = keys[i].toStdString();
-        connect(b, &QPushButton::clicked, this, [this, key, b] { map_points_.setCategoryEnabled(key, b->active()); });
+        map_points_.setCategoryEnabled(key, active);
+        connect(b, &QPushButton::clicked, this, [this, key, b] {
+            const bool active = b->active();
+            map_points_.setCategoryEnabled(key, active);
+            config_.write([&](Json& data) {
+                data["ui_state"]["map_point_categories"][key] = active;
+            });
+            config_.save();
+        });
     }
-    selectMap(0);
-    selectMarkerSize(1);
+    selectMap(std::clamp(ui_state.value("map_index", 0), 0, static_cast<int>(maps.size()) - 1));
+    selectMarkerSize(std::clamp(ui_state.value("marker_size_index", 1), 0, 2));
 }
-
 void MainWindow::buildLaunchTab(QWidget* tab) {
     tab->setFixedSize(262, 299);
     int button_y = 3;
     auto addBtn = [&](const QString& text, auto slot) {
         auto* b = new RoundedButton(text, tab);
-        b->configure(256, 34, 12, 16);
+        b->configure(256, 28, 12, 14);
         b->setToggleMode(true);
-        b->setGeometry(3, button_y, 256, 34);
-        button_y += 40;
+        b->setGeometry(3, button_y, 256, 28);
+        button_y += 33;
         connect(b, &QPushButton::clicked, this, slot);
         return b;
     };
@@ -440,33 +544,86 @@ void MainWindow::buildLaunchTab(QWidget* tab) {
     btn_weapon_detect_->setActive(true);
     btn_display_ = addBtn(QStringLiteral("开启瞄准辅助"), [this] { toggleDisplay(); });
     btn_recoil_ = addBtn(QStringLiteral("开启辅助压枪"), [this] { toggleRecoil(); });
-    auto* sw = new RoundedButton(QStringLiteral("调试特殊武器"), tab);
-    sw->configure(126, 34, 12, 14);
-    sw->setGeometry(3, 123, 126, 34);
-    auto* rw = new RoundedButton(QStringLiteral("调试压枪参数"), tab);
-    rw->configure(126, 34, 12, 14);
-    rw->setGeometry(133, 123, 126, 34);
-    connect(sw, &QPushButton::clicked, this, &MainWindow::openSpecialWeaponDebugger);
-    connect(rw, &QPushButton::clicked, this, &MainWindow::openRecoilDebugger);
-    auto* lab = new QLabel(QStringLiteral("--启用特殊武器助手--"), tab);
+    const auto switch_state = config_.read([](const Json& data) {
+        return data.value("ui_state", Json::object()).value("switches", Json::object());
+    });
+    setWeaponDetectionState(switch_state.value("weapon_detection", true));
+    setDisplayState(switch_state.value("display", false));
+    setRecoilState(switch_state.value("recoil", false));
+
+    auto* lab = new QLabel(QStringLiteral("功能开关"), tab);
     lab->setAlignment(Qt::AlignCenter);
-    lab->setGeometry(3, 164, 256, 25);
+    lab->setGeometry(3, 102, 256, 22);
     lab->setStyleSheet("color:#6B7280;font-family:'Microsoft YaHei';font-size:13px;font-weight:700;");
-    QStringList names{QStringLiteral("迫击炮"), QStringLiteral("火箭筒"), QStringLiteral("投掷物"), "VSS", QStringLiteral("十字弩"), "C4"};
-    QStringList keys{"mortar", "rocket", "throwables", "vss", "crossbow", "c4"};
+
+    QStringList names{
+        QStringLiteral("迫击炮"), QStringLiteral("火箭筒"),
+        QStringLiteral("投掷物"), QStringLiteral("VSS"),
+        QStringLiteral("十字弩"), QStringLiteral("C4"),
+        QStringLiteral("全自动压枪"), QStringLiteral("连狙点压"),
+        QStringLiteral("狙呼吸晃动稳定"), QStringLiteral("自动闪身喷"),
+    };
+    QStringList keys{
+        "mortar", "rocket", "throwables", "vss", "crossbow", "c4",
+        "auto_recoil", "dmr_tap", "sr_breath", "sg_peek",
+    };
+    const Json assistant_state = config_.read([](const Json& data) {
+        return data.value("ui_state", Json::object()).value("assistants", Json::object());
+    });
     for (int i = 0; i < names.size(); ++i) {
         auto* b = new RoundedButton(names[i], tab);
-        b->configure(126, 29, 12, 14);
+        b->configure(126, 27, 12, 13);
         b->setToggleMode(true);
-        b->setActive(true);
-        b->setGeometry(3 + (i % 2) * 130, 198 + (i / 2) * 35, 126, 29);
+        b->setActive(assistant_state.value(keys[i].toStdString(), true));
+        b->setGeometry(3 + (i % 2) * 130, 130 + (i / 2) * 34, 126, 27);
         assistant_buttons_[keys[i]] = b;
         connect(b, &QPushButton::clicked, this, [this, key = keys[i]] { toggleAssistant(key); });
     }
 }
-
 void MainWindow::buildCalibrationTab(QWidget* tab) {
     tab->setFixedSize(262, 299);
+    QVector<std::pair<QString, std::function<void()>>> actions{
+        {QStringLiteral("调试压枪参数"), [this] { openRecoilDebugger(); }},
+        {QStringLiteral("调试特殊武器"), [this] { openSpecialWeaponDebugger(); }},
+        {QStringLiteral("显示所有区域框"), [this] { toggleDebugOverlay(); }},
+        {QStringLiteral("校准区域框窗口"), [this] { openRegionCalibrationWindow(); }},
+        {QStringLiteral("调试区域缩放比例"), [this] { openScaleCalibrator(); }},
+        {QStringLiteral("修改快捷键及游戏按键"), [this] { openHotkeySettingsWindow(); }},
+        {QStringLiteral("自定义显示界面"), [this] { openDisplaySettingsWindow(); }},
+    };
+    for (int i = 0; i < actions.size(); ++i) {
+        auto* b = new RoundedButton(actions[i].first, tab);
+        b->configure(256, 36, 12, 15);
+        b->setGeometry(3, 7 + i * 43, 256, 36);
+        if (i == 2) {
+            b->setToggleMode(true);
+            btn_debug_ = b;
+        }
+        connect(b, &QPushButton::clicked, this, [action = actions[i].second] { action(); });
+    }
+}
+
+void MainWindow::openRegionCalibrationWindow() {
+    if (region_calibration_window_) {
+        showWindowInsideScreen(region_calibration_window_);
+        return;
+    }
+    auto* window = new QWidget(this);
+    window->setAttribute(Qt::WA_DeleteOnClose, true);
+    window->setWindowFlag(Qt::Window, true);
+    window->setWindowTitle(QStringLiteral("校准区域框"));
+    window->resize(280, 330);
+    window->setMinimumSize(280, 330);
+    const auto theme = currentUiTheme(config_);
+    applyThemedPopupWindow(window, config_);
+    region_calibration_window_ = window;
+    connect(window, &QObject::destroyed, this, [this] { region_calibration_window_ = nullptr; });
+
+    auto* title = new QLabel(QStringLiteral("选择要校准的区域"), window);
+    title->setAlignment(Qt::AlignCenter);
+    title->setGeometry(10, 9, 260, 24);
+    title->setStyleSheet(QStringLiteral("color:%1;font-family:'Microsoft YaHei';font-size:14px;font-weight:700;").arg(theme.button_text));
+
     auto square_keys = QSet<QString>{
         "minimap_region", "largemap_region",
         "weapon1_number_region", "weapon2_number_region", "mortar_mount_region",
@@ -474,11 +631,17 @@ void MainWindow::buildCalibrationTab(QWidget* tab) {
         "weapon2_scope_region", "weapon2_grip_region", "weapon2_muzzle_region", "weapon2_stock_region",
     };
     auto add = [&](const QString& name, const QString& key, bool scale, int row, int col) {
-        auto* b = new RoundedButton(name, tab);
+        auto* b = new RoundedButton(name, window);
         b->configure(82, 29, 12, 12);
-        b->setGeometry(2 + col * 87 + (col == 2 ? 1 : 0), 39 + (row - 1) * 32, 82, 29);
+        b->setGeometry(10 + col * 87 + (col == 2 ? 1 : 0), 42 + (row - 1) * 32, 82, 29);
         connect(b, &QPushButton::clicked, this, [this, key, scale, square_keys] {
+            if (region_calibration_overlay_) {
+                region_calibration_overlay_->raise();
+                region_calibration_overlay_->activateWindow();
+                return;
+            }
             auto* ov = new RegionCalibrationOverlay(regions_, key, scale ? RegionCalibrationOverlay::Mode::Scale : RegionCalibrationOverlay::Mode::Region, square_keys.contains(key));
+            region_calibration_overlay_ = ov;
             if (debug_overlay_.created()) {
                 debug_overlay_.clear();
                 debug_overlay_.show(false);
@@ -492,116 +655,136 @@ void MainWindow::buildCalibrationTab(QWidget* tab) {
                     if (changed) drawDebugOverlay();
                 }
             });
+            connect(ov, &QObject::destroyed, this, [this] { region_calibration_overlay_ = nullptr; });
             ov->show();
         });
     };
-    btn_debug_ = new RoundedButton(QStringLiteral("显示所有区域框"), tab);
-    btn_debug_->configure(125, 36, 12, 16);
-    btn_debug_->setToggleMode(true);
-    btn_debug_->setGeometry(3, 0, 125, 36);
-    auto* top = new RoundedButton(QStringLiteral("调试缩放比例"), tab);
-    top->configure(125, 36, 12, 16);
-    top->setGeometry(134, 0, 125, 36);
-    connect(btn_debug_, &QPushButton::clicked, this, &MainWindow::toggleDebugOverlay);
-    connect(top, &QPushButton::clicked, this, &MainWindow::openScaleCalibrator);
     QVector<QVector<std::tuple<QString, bool, QString>>> rows{
-        {{QStringLiteral("大地图"), false, "largemap_region"}, {QStringLiteral("小地图"), false, "minimap_region"}, {QStringLiteral("1km比例尺"), true, "largemap_1km_px"}},
+        {{QStringLiteral("大地图"), false, "largemap_region"}, {QStringLiteral("小地图"), false, "minimap_region"}, {QStringLiteral("1km比例"), true, "largemap_1km_px"}},
         {{QStringLiteral("武器1编号"), false, "weapon1_number_region"}, {QStringLiteral("武器2编号"), false, "weapon2_number_region"}, {QStringLiteral("垂直测高"), false, "elevation_region"}},
         {{QStringLiteral("武器1名称"), false, "weapon1_name_region"}, {QStringLiteral("武器2名称"), false, "weapon2_name_region"}, {QStringLiteral("武器图标"), false, "weapon_region"}},
         {{QStringLiteral("武器1倍镜"), false, "weapon1_scope_region"}, {QStringLiteral("武器2倍镜"), false, "weapon2_scope_region"}, {QStringLiteral("姿势区域"), false, "stance_region"}},
         {{QStringLiteral("武器1枪口"), false, "weapon1_muzzle_region"}, {QStringLiteral("武器2枪口"), false, "weapon2_muzzle_region"}, {QStringLiteral("四倍镜内边"), false, "scope_top_edge_4x_region"}},
         {{QStringLiteral("武器1握把"), false, "weapon1_grip_region"}, {QStringLiteral("武器2握把"), false, "weapon2_grip_region"}, {QStringLiteral("六倍镜内边"), false, "scope_top_edge_6x_region"}},
         {{QStringLiteral("武器1枪托"), false, "weapon1_stock_region"}, {QStringLiteral("武器2枪托"), false, "weapon2_stock_region"}, {QStringLiteral("八倍镜内边"), false, "scope_top_edge_8x_region"}},
-        {{QStringLiteral("迫击炮上炮"), false, "mortar_mount_region"}},
+        {{QStringLiteral("迫击炮上炮"), false, "mortar_mount_region"}, {QStringLiteral("顶部方向"), false, "compass_region"}},
     };
     for (int r = 0; r < rows.size(); ++r) {
         for (int c = 0; c < rows[r].size(); ++c) {
             add(std::get<0>(rows[r][c]), std::get<2>(rows[r][c]), std::get<1>(rows[r][c]), r + 1, c);
         }
     }
+    showWindowInsideScreen(window);
 }
-
 void MainWindow::buildKeyTab(QWidget* tab) {
-    tab->setFixedSize(262, 299);
-    QVector<std::tuple<QString, QString, bool>> rows{
+    tab->setMinimumSize(542, 658);
+    hotkey_labels_.clear();
+    struct RowDef {
+        QString label;
+        QString action;
+        bool editable = true;
+    };
+    const QVector<RowDef> program_rows{
         {QStringLiteral("武器检测开关"), "toggle_weapon_detection", true},
         {QStringLiteral("测距瞄准显示开关"), "toggle_display", true},
         {QStringLiteral("辅助压枪开关"), "toggle_recoil", true},
         {QStringLiteral("大地图测距"), "measure_map", true},
-        {QStringLiteral("迫击炮自动瞄准"), "mortar_auto_aim", true},
+        {QStringLiteral("迫击炮自动瞄准（长按）"), "mortar_auto_aim", true},
         {QStringLiteral("窗口显示开关"), "toggle_window", true},
-        {QStringLiteral("打开装备栏"), "toggle_equipment", true},
-        {QStringLiteral("开火按键"), "fire_key", true},
+        {QStringLiteral("标点向前切换"), "marker_prev", true},
+        {QStringLiteral("标点向后切换"), "marker_next", true},
         {QStringLiteral("地图点位显示"), "mouse_map_assist", false},
-        {QStringLiteral("标点前后切换"), "marker_pair", true},
+        {QStringLiteral("投掷物自动瞬爆"), "throw", true},
+    };
+    const QVector<RowDef> game_rows{
+        {QStringLiteral("打开装备栏"), "toggle_equipment", true},
+        {QStringLiteral("打开小地图"), "game_minimap", true},
+        {QStringLiteral("打开大地图"), "open_large_map", true},
+        {QStringLiteral("开火按键"), "fire_key", true},
+        {QStringLiteral("腰射瞄准（长按）"), "hip_aim_key", true},
     };
     const auto hotkeys = config_.hotkeys();
     auto hotkeyValue = [&](const QString& action, const std::string& fallback) {
         auto it = hotkeys.find(action.toStdString());
         return it == hotkeys.end() ? fallback : it->second;
     };
-    // 10 行紧凑排布：行距压到 26px，最后一行约到 y=263，正好压在底部保存/恢复按钮(y=267)之上，不溢出窗口。
-    const int row_step = 26;
-    const int value_x = 126;
-    const int record_x = 209;
-    const int record_h = 22;
-    for (int row_index = 0; row_index < rows.size(); ++row_index) {
-        const auto& row = rows[row_index];
-        const QString label_text = std::get<0>(row);
-        const QString action = std::get<1>(row);
-        const bool editable = std::get<2>(row);
-        const int y = 3 + row_index * row_step;
-        auto* line = new QWidget(tab);
-        line->setGeometry(0, y, 262, 24);
+    const int record_h = 24;
+    const auto theme = currentUiTheme(config_);
+    auto* root = new QVBoxLayout(tab);
+    root->setContentsMargins(14, 8, 14, 14);
+    root->setSpacing(4);
+    auto addSection = [&](const QString& title) {
+        auto* label = new QLabel(title, tab);
+        label->setFixedHeight(24);
+        label->setStyleSheet(QStringLiteral("color:%1;font-family:'Microsoft YaHei';font-size:14px;font-weight:800;").arg(theme.button_text));
+        root->addWidget(label);
+    };
+    auto addRow = [&](const RowDef& row) {
+        const QString label_text = row.label;
+        const QString action = row.action;
+        const bool editable = row.editable;
+        auto* row_widget = new QWidget(tab);
+        row_widget->setFixedHeight(27);
+        auto* layout = new QHBoxLayout(row_widget);
+        layout->setContentsMargins(4, 0, 4, 0);
+        layout->setSpacing(10);
 
-        auto* desc = new QLabel(label_text, tab);
-        desc->setGeometry(0, y, 120, 24);
-        desc->setStyleSheet("color:#333333;font-family:'Microsoft YaHei';font-size:13px;font-weight:700;");
-        if (action == "marker_pair") {
-            auto* prev = new QLabel(formatHotkey(hotkeyValue("marker_prev", "<up>")), tab);
-            auto* next = new QLabel(formatHotkey(hotkeyValue("marker_next", "<down>")), tab);
-            prev->setGeometry(value_x, y + 2, 28, 20);
-            next->setGeometry(value_x + 68, y + 2, 28, 20);
-            prev->setStyleSheet("color:#2563EB;font-family:Consolas;font-size:13px;font-weight:700;");
-            next->setStyleSheet("color:#2563EB;font-family:Consolas;font-size:13px;font-weight:700;");
-            hotkey_labels_["marker_prev"] = prev;
-            hotkey_labels_["marker_next"] = next;
-            auto* prev_btn = new RoundedButton(QStringLiteral("录制"), tab);
-            prev_btn->configure(44, record_h, 11, 13);
-            prev_btn->setGeometry(value_x + 24, y + 1, 44, record_h);
-            auto* next_btn = new RoundedButton(QStringLiteral("录制"), tab);
-            next_btn->configure(50, record_h, 11, 13);
-            next_btn->setGeometry(record_x, y + 1, 50, record_h);
-            connect(prev_btn, &QPushButton::clicked, this, [this] { beginCaptureHotkey("marker_prev"); });
-            connect(next_btn, &QPushButton::clicked, this, [this] { beginCaptureHotkey("marker_next"); });
-        } else {
-            const std::string fallback = action == "fire_key" ? "end"
-                : action == "mortar_auto_aim" ? "mouse_right"
-                : action == "toggle_window" ? "<home>"
-                : "";
-            const QString display = editable
-                ? formatHotkey(hotkeyValue(action, fallback))
-                : QStringLiteral("鼠标左键 + 中键");
-            auto* value = new QLabel(display, tab);
-            value->setGeometry(value_x, y + 2, editable ? 80 : 132, 20);
-            value->setStyleSheet("color:#2563EB;font-family:Consolas;font-size:13px;font-weight:700;");
-            if (editable) {
-                hotkey_labels_[action] = value;
-                auto* rec = new RoundedButton(QStringLiteral("录制"), tab);
-                rec->configure(50, record_h, 11, 13);
-                rec->setGeometry(record_x, y + 1, 50, record_h);
-                connect(rec, &QPushButton::clicked, this, [this, action] { beginCaptureHotkey(action); });
-            }
+        auto* desc = new QLabel(label_text, row_widget);
+        desc->setFixedWidth(170);
+        desc->setStyleSheet(QStringLiteral("color:%1;font-family:'Microsoft YaHei';font-size:13px;font-weight:700;").arg(theme.label));
+        layout->addWidget(desc);
+
+        const std::string fallback = action == "fire_key" ? "end"
+            : action == "mortar_auto_aim" ? "mouse_right"
+            : action == "toggle_window" ? "<home>"
+            : action == "game_minimap" ? "n"
+            : action == "hip_aim_key" ? "mouse_right"
+            : action == "open_large_map" ? "m"
+            : action == "marker_prev" ? "<up>"
+            : action == "marker_next" ? "<down>"
+            : action == "throw" ? "b"
+            : "";
+        const QString display = editable
+            ? formatHotkey(hotkeyValue(action, fallback))
+            : QStringLiteral("鼠标左键 + 中键");
+        auto* value = new QLabel(display, row_widget);
+        value->setStyleSheet(QStringLiteral("color:%1;font-family:Consolas;font-size:13px;font-weight:700;").arg(theme.accent));
+        layout->addWidget(value, 1);
+
+        if (editable) {
+            hotkey_labels_[action] = value;
+            auto* rec = new RoundedButton(QStringLiteral("录制"), row_widget);
+            rec->configure(64, record_h, 11, 13);
+            rec->setFixedSize(64, record_h);
+            layout->addWidget(rec);
+            connect(rec, &QPushButton::clicked, this, [this, action] { beginCaptureHotkey(action); });
         }
+        root->addWidget(row_widget);
+    };
+    addSection(QStringLiteral("程序快捷键"));
+    for (const auto& row : program_rows) {
+        addRow(row);
     }
-    auto* btns = new QWidget(tab);
-    btns->setGeometry(1, 267, 260, 28);
+    root->addSpacing(8);
+    addSection(QStringLiteral("游戏按键同步"));
+    for (const auto& row : game_rows) {
+        addRow(row);
+    }
+    root->addStretch(1);
+
+    auto* bottom = new QWidget(tab);
+    auto* bottom_layout = new QHBoxLayout(bottom);
+    bottom_layout->setContentsMargins(4, 0, 4, 0);
+    bottom_layout->setSpacing(10);
     auto* save = new RoundedButton(QStringLiteral("保存快捷键"), tab);
     auto* reset = new RoundedButton(QStringLiteral("恢复默认"), tab);
-    save->configure(126, 28, 12, 14);
-    reset->configure(126, 28, 12, 14);
-    save->setGeometry(3, 267, 126, 28);
-    reset->setGeometry(133, 267, 126, 28);
+    save->configure(220, 32, 12, 14);
+    reset->configure(220, 32, 12, 14);
+    save->setFixedHeight(32);
+    reset->setFixedHeight(32);
+    bottom_layout->addWidget(save);
+    bottom_layout->addWidget(reset);
+    root->addWidget(bottom);
     connect(save, &QPushButton::clicked, this, &MainWindow::saveHotkeys);
     connect(reset, &QPushButton::clicked, this, &MainWindow::resetDefaultHotkeys);
 }
@@ -643,21 +826,39 @@ void MainWindow::toggleAssistant(const QString& key) {
         callbacks_.set_assistant(key.toStdString(), active);
         return;
     }
+    config_.write([&](Json& data) {
+        data["ui_state"]["assistants"][key.toStdString()] = active;
+    });
+    config_.save();
     special_.setManualEnabled(key.toStdString(), active);
     if (key == "throwables") throwables_.setEnabled(active);
     if (key == "c4") c4_.setEnabled(active);
 }
 
 void MainWindow::selectMap(int index) {
-    QStringList full{QStringLiteral("艾伦格 (Erangel)"), QStringLiteral("米拉玛 (Miramar)"), QStringLiteral("泰戈 (Taego)"), QStringLiteral("荣都 (Rondo)"), QStringLiteral("帝斯顿 (Deston)"), QStringLiteral("维寒迪 (Vikendi)")};
+    QStringList full{QStringLiteral("艾伦格(Erangel)"), QStringLiteral("米拉玛(Miramar)"), QStringLiteral("泰戈 (Taego)"), QStringLiteral("荣都 (Rondo)"), QStringLiteral("帝斯顿(Deston)"), QStringLiteral("维寒迪(Vikendi)")};
     for (int i = 0; i < map_buttons_.size(); ++i) map_buttons_[i]->setActive(i == index);
-    if (index >= 0 && index < full.size()) map_points_.setMap(full[index].toStdString());
+    if (index >= 0 && index < full.size()) {
+        map_points_.setMap(full[index].toStdString());
+        config_.write([&](Json& data) {
+            data["ui_state"]["map_index"] = index;
+            data["ui_state"]["map_name"] = full[index].toStdString();
+        });
+        config_.save();
+    }
 }
 
 void MainWindow::selectMarkerSize(int index) {
     QStringList keys{"small", "medium", "large"};
     for (int i = 0; i < size_buttons_.size(); ++i) size_buttons_[i]->setActive(i == index);
-    if (index >= 0 && index < keys.size()) map_points_.setMarkerSize(keys[index].toStdString());
+    if (index >= 0 && index < keys.size()) {
+        map_points_.setMarkerSize(keys[index].toStdString());
+        config_.write([&](Json& data) {
+            data["ui_state"]["marker_size_index"] = index;
+            data["ui_state"]["marker_size"] = keys[index].toStdString();
+        });
+        config_.save();
+    }
 }
 
 void MainWindow::selectPntColorMode(const QString& mode) {
@@ -666,6 +867,7 @@ void MainWindow::selectPntColorMode(const QString& mode) {
     }
     config_.write([&](Json& data) {
         data["pnt_color_mode"] = mode.toStdString();
+        data["ui_state"]["pnt_color_mode"] = mode.toStdString();
         if (data.contains("pnt_color_modes") && data["pnt_color_modes"].contains(mode.toStdString())) {
             data["pnt_colors"] = data["pnt_color_modes"][mode.toStdString()];
         }
@@ -673,7 +875,6 @@ void MainWindow::selectPntColorMode(const QString& mode) {
     config_.save();
     if (callbacks_.sync_marker_colors) callbacks_.sync_marker_colors();
 }
-
 void MainWindow::toggleDebugOverlay() {
     debug_overlay_enabled_ = btn_debug_ ? btn_debug_->active() : !debug_overlay_enabled_;
     if (!debug_overlay_.created()) {
@@ -737,28 +938,136 @@ void MainWindow::openScaleCalibrator() {
     if (!scale_calibration_window_) {
         scale_calibration_window_ = new ScaleCalibrationWindow(config_, regions_, this);
         scale_calibration_window_->setWindowFlag(Qt::Window, true);
+        connect(scale_calibration_window_, &QObject::destroyed, this, [this] {
+            scale_calibration_window_ = nullptr;
+        });
     }
-    scale_calibration_window_->show();
-    scale_calibration_window_->raise();
-    scale_calibration_window_->activateWindow();
+    showWindowInsideScreen(scale_calibration_window_);
 }
 
 void MainWindow::openRecoilDebugger() {
+    if (recoil_debugger_window_) {
+        showWindowInsideScreen(recoil_debugger_window_);
+        return;
+    }
     auto* window = new RecoilDebuggerWindow(config_, recoil_);
     window->setAttribute(Qt::WA_DeleteOnClose, true);
     window->setWindowFlag(Qt::Window, true);
-    window->show();
-    window->raise();
-    window->activateWindow();
+    recoil_debugger_window_ = window;
+    connect(window, &QObject::destroyed, this, [this] { recoil_debugger_window_ = nullptr; });
+    showWindowInsideScreen(window);
 }
 
 void MainWindow::openSpecialWeaponDebugger() {
+    if (special_weapon_debugger_window_) {
+        showWindowInsideScreen(special_weapon_debugger_window_);
+        return;
+    }
     auto* window = new SpecialWeaponDebuggerWindow(config_);
     window->setAttribute(Qt::WA_DeleteOnClose, true);
     window->setWindowFlag(Qt::Window, true);
-    window->show();
-    window->raise();
-    window->activateWindow();
+    special_weapon_debugger_window_ = window;
+    connect(window, &QObject::destroyed, this, [this] { special_weapon_debugger_window_ = nullptr; });
+    showWindowInsideScreen(window);
+}
+
+void MainWindow::buildHelpTab(QWidget* tab) {
+    tab->setFixedSize(262, 299);
+    const QString text = QStringLiteral(
+        "首次使用\n"
+        "1. 选择与游戏一致的色盲模式\n"
+        "2. 校准区域框与缩放比例\n"
+        "3. 快捷键需和游戏按键一致\n"
+        "4. 开火不要用鼠标左键，改为同步按键\n"
+        "5. 游戏灵敏度请保持默认\n"
+        "\n"
+        "日常提醒\n"
+        "打开装备栏、开火、小地图、大地图按键\n"
+        "如果在游戏内改过，也要在这里同步修改。"
+    );
+    auto* summary = new QLabel(text, tab);
+    summary->setWordWrap(true);
+    summary->setAlignment(Qt::AlignLeft | Qt::AlignTop);
+    summary->setGeometry(7, 8, 248, 232);
+    summary->setStyleSheet("font-family:'Microsoft YaHei';font-size:11px;font-weight:700;");
+
+    auto* open = new RoundedButton(QStringLiteral("查看完整使用说明文档"), tab);
+    open->configure(256, 42, 12, 15);
+    open->setGeometry(3, 253, 256, 42);
+    connect(open, &QPushButton::clicked, this, &MainWindow::openFullHelpWindow);
+}
+
+void MainWindow::openDisplaySettingsWindow() {
+    if (!display_settings_window_) {
+        display_settings_window_ = new DisplaySettingsWindow(config_, this);
+        display_settings_window_->setWindowFlag(Qt::Window, true);
+        connect(display_settings_window_, &QObject::destroyed, this, [this] {
+            display_settings_window_ = nullptr;
+        });
+        connect(display_settings_window_, &DisplaySettingsWindow::themeChanged, this, [this] {
+            applyTheme();
+        });
+        connect(display_settings_window_, &DisplaySettingsWindow::hudChanged, this, [this] {
+            if (callbacks_.refresh_status_hud) callbacks_.refresh_status_hud();
+        });
+    }
+    showWindowInsideScreen(display_settings_window_);
+}
+
+void MainWindow::openHotkeySettingsWindow() {
+    if (!hotkey_settings_window_) {
+        auto* window = new QWidget(this);
+        window->setAttribute(Qt::WA_DeleteOnClose, true);
+        window->setWindowFlag(Qt::Window, true);
+        window->setWindowTitle(QStringLiteral("修改快捷键及游戏按键"));
+        window->resize(580, 720);
+        window->setMinimumSize(560, 680);
+        const auto theme = currentUiTheme(config_);
+        auto* page = new QWidget(window);
+        page->setGeometry(18, 42, 542, 658);
+        page->setStyleSheet(QStringLiteral("background:%1;").arg(theme.page));
+        buildKeyTab(page);
+        auto* follower = new ChildGeometryFollower(page, QMargins(18, 42, 20, 20), window);
+        window->installEventFilter(follower);
+        applyThemedPopupWindow(window, config_);
+        hotkey_settings_window_ = window;
+        connect(window, &QObject::destroyed, this, [this] { hotkey_settings_window_ = nullptr; });
+    }
+    showWindowInsideScreen(hotkey_settings_window_);
+}
+
+void MainWindow::openFullHelpWindow() {
+    const auto pdf_path = config_.paths().readmePdfFile();
+    if (!std::filesystem::exists(pdf_path)) {
+        if (help_window_) {
+            showWindowInsideScreen(help_window_);
+            return;
+        }
+        auto* window = new QWidget(this);
+        window->setAttribute(Qt::WA_DeleteOnClose, true);
+        window->setWindowFlag(Qt::Window, true);
+        window->setWindowTitle(QStringLiteral("未找到 README.pdf"));
+        window->resize(420, 150);
+        window->setMinimumSize(420, 150);
+        const auto theme = currentUiTheme(config_);
+        applyThemedPopupWindow(window, config_);
+
+        auto* text = new QLabel(QStringLiteral("未找到程序同目录下的 README.pdf。\n请将 README.pdf 放到 exe 所在目录后重新点击。"), window);
+        text->setWordWrap(true);
+        text->setAlignment(Qt::AlignCenter);
+        text->setGeometry(18, 22, 384, 62);
+        text->setStyleSheet(QStringLiteral("color:%1;font-family:'Microsoft YaHei';font-size:13px;font-weight:700;").arg(theme.button_text));
+
+        auto* close = new RoundedButton(QStringLiteral("知道了"), window);
+        close->configure(128, 34, 12, 14);
+        close->setGeometry(146, 98, 128, 34);
+        connect(close, &QPushButton::clicked, window, &QWidget::close);
+        help_window_ = window;
+        connect(window, &QObject::destroyed, this, [this] { help_window_ = nullptr; });
+        showWindowInsideScreen(window);
+        return;
+    }
+    QDesktopServices::openUrl(QUrl::fromLocalFile(QString::fromStdWString(pdf_path.wstring())));
 }
 
 void MainWindow::mousePressEvent(QMouseEvent* event) { drag_offset_ = event->globalPosition().toPoint() - frameGeometry().topLeft(); }
@@ -802,7 +1111,9 @@ void MainWindow::beginCaptureHotkey(const QString& action) {
 bool MainWindow::captureHotkey(const QString& key, const QStringList& modifiers) {
     if (capturing_action_.isEmpty() || key.isEmpty()) return false;
 
-    const bool single_only = capturing_action_ == "throw" || capturing_action_ == "toggle_equipment" || capturing_action_ == "fire_key";
+    const bool single_only = capturing_action_ == "throw" || capturing_action_ == "toggle_equipment" ||
+                             capturing_action_ == "game_minimap" || capturing_action_ == "open_large_map" ||
+                             capturing_action_ == "hip_aim_key" || capturing_action_ == "fire_key";
     if (single_only && !modifiers.isEmpty()) {
         const QString action = capturing_action_;
         if (hotkey_labels_.contains(action)) {
@@ -941,6 +1252,9 @@ void MainWindow::resetDefaultHotkeys() {
             {"toggle_recoil", "<f3>"},
             {"measure_map", "<f4>"},
             {"mortar_auto_aim", "mouse_right"},
+            {"game_minimap", "n"},
+            {"hip_aim_key", "mouse_right"},
+            {"open_large_map", "m"},
             {"marker_prev", "<up>"},
             {"marker_next", "<down>"},
             {"toggle_equipment", "tab"},
@@ -958,7 +1272,14 @@ void MainWindow::resetDefaultHotkeys() {
 
 QString MainWindow::formatHotkey(const std::string& value) const {
     QString s = QString::fromStdString(value).replace("<", "").replace(">", "");
+    const QString lower = s.toLower();
+    if (lower == QStringLiteral("up")) return QStringLiteral("上");
+    if (lower == QStringLiteral("down")) return QStringLiteral("下");
+    if (lower == QStringLiteral("left")) return QStringLiteral("左");
+    if (lower == QStringLiteral("right")) return QStringLiteral("右");
+    if (lower == QStringLiteral("mouse_right") || lower == QStringLiteral("rbutton")) return QStringLiteral("鼠标右键");
+    if (lower == QStringLiteral("mouse_left") || lower == QStringLiteral("lbutton")) return QStringLiteral("鼠标左键");
+    if (lower == QStringLiteral("mouse_middle") || lower == QStringLiteral("mbutton")) return QStringLiteral("鼠标中键");
     return s.toUpper();
 }
-
 } // namespace pubg::ui

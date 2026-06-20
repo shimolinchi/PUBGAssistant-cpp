@@ -38,6 +38,9 @@ public:
     // 应用图标路径：root/icon.ico。
     [[nodiscard]] std::filesystem::path iconFile() const;
 
+    // 完整使用说明 PDF：root/README.pdf。
+    [[nodiscard]] std::filesystem::path readmePdfFile() const;
+
 private:
     std::filesystem::path root_;
 };

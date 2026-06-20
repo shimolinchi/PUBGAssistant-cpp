@@ -63,6 +63,8 @@ private:
 
     // 打印当前 F1/F2/F3 三个核心开关状态，便于 Windows 首轮调试。
     void printStatus() const;
+    void loadUiState();
+    void saveSwitchState(const std::string& key, bool enabled);
     void syncMarkerColorsFromConfig();
     int hotkeyVk(const std::string& name, const std::string& fallback) const;
     HotkeyManager::HotkeyCombo hotkeyCombo(const std::string& name, const std::string& fallback) const;
@@ -77,6 +79,9 @@ private:
     void openGameMinimapForAssist();
     void closeGameMinimapForAssist();
     void handleManualGameMinimapToggle(bool pressed);
+    void handleEscapeKey(bool pressed);
+    bool gameMenuInputSuppressed() const;
+    bool shouldHoldMortarStateAfterEsc() const;
     void handleMortarInteractKey(bool pressed);
     void startMortarMountConfirmation();
     void setMortarMounted(bool mounted);
@@ -124,6 +129,9 @@ private:
     bool game_minimap_opened_by_app_ = false;
     bool manual_special_display_suppressed_ = false;
     double manual_minimap_toggle_ignore_until_ = 0.0;
+    bool game_menu_active_ = false;
+    double game_menu_input_suppress_until_ = 0.0;
+    bool hold_mortar_until_reacquired_ = false;
     std::atomic_uint64_t mortar_mount_session_{0};
     std::mutex mortar_mount_mutex_;
     std::thread mortar_mount_worker_;

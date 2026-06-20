@@ -42,18 +42,22 @@ add_executable(PUBGAssistant-cpp
     src/ScopeMotionTracker.cpp
     src/ui/MainWindow.cpp
     src/ui/RoundedButton.cpp
+    src/ui/Theme.cpp
     src/ui/CurveEditor.cpp
     src/ui/RegionCalibrationOverlay.cpp
     src/ui/ScaleCalibrationWindow.cpp
     src/ui/RecoilDebuggerWindow.cpp
     src/ui/SpecialWeaponDebuggerWindow.cpp
+    src/ui/DisplaySettingsWindow.cpp
     include/ui/MainWindow.hpp
     include/ui/RoundedButton.hpp
+    include/ui/Theme.hpp
     include/ui/CurveEditor.hpp
     include/ui/RegionCalibrationOverlay.hpp
     include/ui/ScaleCalibrationWindow.hpp
     include/ui/RecoilDebuggerWindow.hpp
     include/ui/SpecialWeaponDebuggerWindow.hpp
+    include/ui/DisplaySettingsWindow.hpp
     include/MortarAutoAim.hpp
     include/MortarMountDetector.hpp
 )
@@ -114,6 +118,10 @@ add_custom_command(TARGET PUBGAssistant-cpp POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         ${CMAKE_SOURCE_DIR}/icon.ico
         $<TARGET_FILE_DIR:PUBGAssistant-cpp>/icon.ico
+    COMMAND ${CMAKE_COMMAND}
+        -DOPTIONAL_SOURCE=${CMAKE_SOURCE_DIR}/README.pdf
+        -DOPTIONAL_DESTINATION=$<TARGET_FILE_DIR:PUBGAssistant-cpp>/README.pdf
+        -P ${CMAKE_SOURCE_DIR}/cmake/copy_optional_file.cmake
 )
 
 if(CMAKE_BUILD_TYPE STREQUAL "Release")

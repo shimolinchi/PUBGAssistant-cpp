@@ -10,6 +10,7 @@ RegionManager::RegionManager(Config& config) : config_(config) {
     screen_h_ = GetSystemMetrics(SM_CYSCREEN);
 #endif
     syncCrosshairRegion();
+    syncCompassRegion();
 }
 
 std::optional<Rect> RegionManager::getRealRegion(const std::string& name) const {
@@ -71,6 +72,43 @@ void RegionManager::syncCrosshairRegion() {
     rect.width = side;
     rect.height = side;
     setRealRegion("crosshair_region", rect);
+}
+
+void RegionManager::syncCompassRegion() {
+    const bool has_compass = config_.read([](const Json& data) {
+        return data.contains("real_regions") &&
+               data["real_regions"].contains("compass_region") &&
+               data["real_regions"]["compass_region"].is_object();
+    });
+    if (has_compass) {
+        return;
+    }
+
+    const auto migrated = config_.read([](const Json& data) -> std::optional<Rect> {
+        if (!data.contains("detection_regions") ||
+            !data["detection_regions"].contains("compass_region") ||
+            !data["detection_regions"]["compass_region"].is_object()) {
+            return std::nullopt;
+        }
+        const auto& r = data["detection_regions"]["compass_region"];
+        Rect rect;
+        rect.left = static_cast<int>(std::round(r.value("left", 0.0)));
+        rect.top = static_cast<int>(std::round(r.value("top", 0.0)));
+        rect.width = static_cast<int>(std::round(r.value("width", 0.0)));
+        rect.height = static_cast<int>(std::round(r.value("height", 0.0)));
+        return rect.valid() ? std::optional<Rect>(rect) : std::nullopt;
+    });
+    if (migrated) {
+        setRealRegion("compass_region", *migrated);
+        return;
+    }
+
+    Rect rect;
+    rect.width = std::max(300, static_cast<int>(std::round(screen_w_ * 0.42)));
+    rect.height = std::max(50, static_cast<int>(std::round(screen_h_ * 0.07)));
+    rect.left = static_cast<int>(std::round((screen_w_ - rect.width) / 2.0));
+    rect.top = 0;
+    setRealRegion("compass_region", rect);
 }
 
 } // namespace pubg

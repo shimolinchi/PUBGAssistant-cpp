@@ -11,6 +11,8 @@ class RoundedButton : public QPushButton {
     Q_OBJECT
 public:
     explicit RoundedButton(const QString& text, QWidget* parent = nullptr);
+    static void setThemeColors(const QString& normal, const QString& hover, const QString& pressed,
+                               const QString& active, const QString& border, const QString& text);
 
     // 设置按钮固定尺寸、圆角和字号，便于主窗口按 Python 像素布局复刻。
     void configure(int width, int height, int radius, int pixel_font_size);

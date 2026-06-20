@@ -29,6 +29,10 @@ public:
     // 松开鼠标右键。
     static void mouseRightUp();
 
+    // 按下/松开任意虚拟键，鼠标键会自动走 mouse event。
+    static void pressVirtualKey(int vk);
+    static void releaseVirtualKey(int vk);
+
     // 滚动鼠标滚轮。positive 表示向上，negative 表示向下；notches 是滚动格数。
     static void mouseWheel(int notches);
 

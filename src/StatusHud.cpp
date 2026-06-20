@@ -220,26 +220,31 @@ void StatusHud::render() {
     std::vector<OverlayCommand> cmds;
     {
         std::lock_guard lock(mutex_);
+        const Json display_cfg = config_.read([](const Json& data) {
+            return data.value("ui_state", Json::object()).value("display", Json::object());
+        });
         const double base_x = 35.0;
         const double top_y = static_cast<double>(regions_.screenHeight()) - 300.0;
-        const int font = 13;
+        const int font = std::clamp(display_cfg.value("status_font_size", 13), 10, 22);
+        const double line_gap = std::clamp(display_cfg.value("status_line_gap", 25.0), 18.0, 40.0);
+        const int text_alpha = std::clamp(static_cast<int>(std::round(display_cfg.value("status_text_alpha", 1.0) * 255.0)), 0, 255);
         double y = top_y + 5.0;
 
         if (marker_indicator_visible_) {
             const auto hex = marker_hex_.count(marker_color_) ? marker_hex_[marker_color_] : "#FFFFFF";
             const auto bgr = hexToBgr(hex);
-            cmds.push_back({OverlayCommand::Type::Text, base_x, y, 0, 0, 0, "当前使用标点：", bgr, 1, font});
-            cmds.push_back({OverlayCommand::Type::Circle, base_x + 118.0, y + 9.0, 0, 0, 6.0, "", bgr, 2});
+            cmds.push_back({OverlayCommand::Type::Text, base_x, y, 0, 0, 0, "当前使用标点：", bgr, 1, font, text_alpha});
+            cmds.push_back({OverlayCommand::Type::Circle, base_x + 118.0, y + 9.0, 0, 0, 6.0, "", bgr, 2, 18, text_alpha});
         }
 
         y = top_y + 33.0;
         double x = base_x;
-        cmds.push_back({OverlayCommand::Type::Text, x, y, 0, 0, 0, "识别", weapon_detection_enabled_ ? statusColor("Green") : statusColor("red"), 1, font});
+        cmds.push_back({OverlayCommand::Type::Text, x, y, 0, 0, 0, "识别", weapon_detection_enabled_ ? statusColor("Green") : statusColor("red"), 1, font, text_alpha});
         x += 35.0;
-        cmds.push_back({OverlayCommand::Type::Text, x, y, 0, 0, 0, "测距", display_enabled_ ? statusColor("Green") : statusColor("red"), 1, font});
+        cmds.push_back({OverlayCommand::Type::Text, x, y, 0, 0, 0, "测距", display_enabled_ ? statusColor("Green") : statusColor("red"), 1, font, text_alpha});
         x += 35.0;
 #if PUBG_ENABLE_INPUT_CONTROL
-        cmds.push_back({OverlayCommand::Type::Text, x, y, 0, 0, 0, "压枪", recoil_enabled_ ? statusColor("Green") : statusColor("red"), 1, font});
+        cmds.push_back({OverlayCommand::Type::Text, x, y, 0, 0, 0, "压枪", recoil_enabled_ ? statusColor("Green") : statusColor("red"), 1, font, text_alpha});
         x += 35.0;
 #endif
 
@@ -252,16 +257,16 @@ void StatusHud::render() {
             eq_text = "正在确认中";
             eq_color = statusColor("Orange");
         }
-        cmds.push_back({OverlayCommand::Type::Text, x, y, 0, 0, 0, eq_text, eq_color, 1, font});
+        cmds.push_back({OverlayCommand::Type::Text, x, y, 0, 0, 0, eq_text, eq_color, 1, font, text_alpha});
 
         y = top_y + 58.0;
         const auto white = statusColor("white");
         const auto w1 = equipment_.count(1) ? equipment_.at(1) : WeaponSlotInfo{};
         const auto w2 = equipment_.count(2) ? equipment_.at(2) : WeaponSlotInfo{};
-        cmds.push_back({OverlayCommand::Type::Text, base_x, y, 0, 0, 0, "武器1: " + formatWeapon(w1), white, 1, font});
-        y += 25.0;
-        cmds.push_back({OverlayCommand::Type::Text, base_x, y, 0, 0, 0, "武器2: " + formatWeapon(w2), white, 1, font});
-        y += 25.0;
+        cmds.push_back({OverlayCommand::Type::Text, base_x, y, 0, 0, 0, "武器1: " + formatWeapon(w1), white, 1, font, text_alpha});
+        y += line_gap;
+        cmds.push_back({OverlayCommand::Type::Text, base_x, y, 0, 0, 0, "武器2: " + formatWeapon(w2), white, 1, font, text_alpha});
+        y += line_gap;
         const std::string pose = current_stance_.empty() ? "未知" : mapped(kStanceNames, current_stance_);
         const std::string peek = peek_direction_ == 1 ? "左" : (peek_direction_ == 2 ? "右" : "???");
         std::string current_line = "当前: " + displayWeaponName(current_weapon_) + " | " + pose;
@@ -270,7 +275,7 @@ void StatusHud::render() {
         }
         cmds.push_back({OverlayCommand::Type::Text, base_x, y, 0, 0, 0,
                         current_line,
-                        white, 1, font});
+                        white, 1, font, text_alpha});
 
         if (!temporary_message_.empty()) {
             const double box_w = 360.0;

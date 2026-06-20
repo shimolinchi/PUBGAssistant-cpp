@@ -4,6 +4,7 @@
 #include <QKeySequence>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QPainterPath>
 
 #include <algorithm>
 #include <cmath>
@@ -53,6 +54,16 @@ CurveEditor::CurveEditor(QWidget* parent) : QWidget(parent) {
 void CurveEditor::setCurves(std::vector<Curve> curves) {
     curves_ = std::move(curves);
     normalizeSelection();
+    update();
+}
+
+void CurveEditor::setThemeColors(const QColor& background, const QColor& grid, const QColor& text,
+                                 const QColor& axis, const QColor& point_outline) {
+    background_color_ = background;
+    grid_color_ = grid;
+    text_color_ = text;
+    axis_color_ = axis;
+    point_outline_color_ = point_outline;
     update();
 }
 
@@ -164,7 +175,7 @@ QRectF CurveEditor::plotRect() const {
     });
     const int left_margin = left_axis_label_.isEmpty() ? 56 : 84;
     const int right_margin = has_right_axis ? 84 : 24;
-    return rect().adjusted(left_margin, 58, -right_margin, -40);
+    return rect().adjusted(left_margin, 66, -right_margin, -40);
 }
 
 void CurveEditor::ranges(double& min_x, double& max_x, double& min_y, double& max_y) const {
@@ -268,7 +279,11 @@ void CurveEditor::paintEvent(QPaintEvent*) {
     QPainter p(this);
     p.setRenderHint(QPainter::Antialiasing, true);
     p.setRenderHint(QPainter::TextAntialiasing, true);
-    p.fillRect(rect(), QColor("#F8FAFC"));
+    const QRectF outer = rect().adjusted(0.5, 0.5, -0.5, -0.5);
+    QPainterPath rounded_background;
+    rounded_background.addRoundedRect(outer, 8.0, 8.0);
+    p.fillPath(rounded_background, background_color_);
+    p.setClipPath(rounded_background);
     double min_x, max_x, min_y, max_y;
     ranges(min_x, max_x, min_y, max_y);
     double right_min_y = 0.0;
@@ -287,7 +302,7 @@ void CurveEditor::paintEvent(QPaintEvent*) {
     // Draw denser helper grid first, then label only real integer ticks.
     for (int i = 0; i <= 10; ++i) {
         const double y = pr.bottom() - pr.height() * i / 10.0;
-        p.setPen(QColor("#E5E7EB"));
+        p.setPen(grid_color_);
         p.drawLine(QPointF(pr.left(), y), QPointF(pr.right(), y));
     }
     const double y_step = fractionalTickStep(min_y, max_y, 12);
@@ -295,14 +310,14 @@ void CurveEditor::paintEvent(QPaintEvent*) {
     for (double value = first_y_tick; value <= max_y + y_step * 0.25; value += y_step) {
         const double y = pr.bottom() - (value - min_y) / (max_y - min_y) * pr.height();
         if (y < pr.top() - 0.5 || y > pr.bottom() + 0.5) continue;
-        p.setPen(QColor("#374151"));
+        p.setPen(text_color_);
         p.setFont(tick_font);
         // y 轴刻度数字右对齐到绘图区左边界，读起来更整齐清晰。
         p.drawText(QRectF(0, y - 9, pr.left() - 6, 18),
                    Qt::AlignRight | Qt::AlignVCenter, QString::number(value, 'f', y_step < 1.0 ? 2 : 0));
     }
     if (!left_axis_label_.isEmpty()) {
-        p.setPen(QColor("#374151"));
+        p.setPen(text_color_);
         p.setFont(tick_font);
         p.drawText(QRectF(0, pr.top() - 28, pr.left() - 4, 18),
                    Qt::AlignRight | Qt::AlignVCenter, left_axis_label_);
@@ -327,19 +342,19 @@ void CurveEditor::paintEvent(QPaintEvent*) {
     }
     for (int i = 0; i <= 10; ++i) {
         const double x = pr.left() + pr.width() * i / 10.0;
-        p.setPen(QColor("#E5E7EB"));
+        p.setPen(grid_color_);
         p.drawLine(QPointF(x, pr.top()), QPointF(x, pr.bottom()));
     }
     const int x_step = integerTickStep(min_x, max_x, 10);
     const int first_x_tick = static_cast<int>(std::ceil(min_x / x_step)) * x_step;
     for (int value = first_x_tick; value <= static_cast<int>(std::floor(max_x)); value += x_step) {
         const double x = pr.left() + (static_cast<double>(value) - min_x) / (max_x - min_x) * pr.width();
-        p.setPen(QColor("#374151"));
+        p.setPen(text_color_);
         p.setFont(tick_font);
         p.drawText(QRectF(x - 28, pr.bottom() + 4, 56, 18),
                    Qt::AlignHCenter | Qt::AlignTop, QString::number(value));
     }
-    p.setPen(QPen(QColor("#111827"), 2));
+    p.setPen(QPen(axis_color_, 2));
     p.drawRect(pr);
     if (has_right_axis) {
         p.setPen(QPen(QColor("#EA580C"), 2));
@@ -359,7 +374,7 @@ void CurveEditor::paintEvent(QPaintEvent*) {
         p.setBrush(c.color);
         p.setPen(Qt::NoPen);
         p.drawEllipse(QPointF(legend_x + 6, legend_y - 4), 5, 5);
-        p.setPen(QColor("#374151"));
+        p.setPen(text_color_);
         const double text_w = p.fontMetrics().horizontalAdvance(label);
         p.drawText(QPointF(legend_x + 16, legend_y), label);
         legend_x += 16 + text_w + 22;
@@ -374,16 +389,16 @@ void CurveEditor::paintEvent(QPaintEvent*) {
         p.setPen(QPen(c.color, 2));
         p.setBrush(Qt::NoBrush);
         p.drawPolyline(poly);
-        p.setPen(QPen(QColor("#FFFFFF"), 3));
+        p.setPen(QPen(point_outline_color_, 3));
         p.setBrush(c.color);
         for (int i = 0; i < poly.size(); ++i) {
             const auto& pt = poly[i];
             p.drawEllipse(pt, 5, 5);
-            p.setPen(QPen(isSelected(static_cast<int>(&c - &curves_[0]), i) ? QColor("#FACC15") : QColor("#111827"),
+            p.setPen(QPen(isSelected(static_cast<int>(&c - &curves_[0]), i) ? QColor("#FACC15") : axis_color_,
                           isSelected(static_cast<int>(&c - &curves_[0]), i) ? 3 : 1));
             p.drawEllipse(pt, isSelected(static_cast<int>(&c - &curves_[0]), i) ? 7 : 5,
                           isSelected(static_cast<int>(&c - &curves_[0]), i) ? 7 : 5);
-            p.setPen(QPen(QColor("#FFFFFF"), 3));
+            p.setPen(QPen(point_outline_color_, 3));
         }
     }
 }

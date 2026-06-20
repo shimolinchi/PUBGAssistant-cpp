@@ -10,6 +10,8 @@
 #include <algorithm>
 #include <limits>
 
+#include "ui/Theme.hpp"
+
 namespace pubg::ui {
 
 namespace {
@@ -49,19 +51,8 @@ std::pair<double, double> throwableXRange(bool jump) {
 SpecialWeaponDebuggerWindow::SpecialWeaponDebuggerWindow(Config& config, QWidget* parent)
     : QWidget(parent), config_(config) {
     setWindowTitle(QStringLiteral("特殊武器参数调试"));
-    setObjectName("specialDbgRoot");
-    setStyleSheet(
-        "#specialDbgRoot{background:#FFFFFF;}"
-        "QLabel{color:#030712;font-family:'Microsoft YaHei';}"
-        "QComboBox{background:#FFFFFF;color:#030712;border:1px solid #9CA3AF;border-radius:4px;padding:3px 6px;selection-background-color:#DBEAFE;selection-color:#030712;}"
-        "QComboBox QAbstractItemView{background:#FFFFFF;color:#030712;border:1px solid #9CA3AF;selection-background-color:#DBEAFE;selection-color:#030712;}"
-        "QLineEdit{background:#FFFFFF;color:#030712;border:1px solid #9CA3AF;border-radius:4px;padding:3px 6px;}"
-        "QPushButton{background:#EEF2F7;color:#030712;border:1px solid #9CA3AF;border-radius:5px;padding:6px 0;}"
-        "QPushButton:hover{background:#E2E8F0;}"
-        "QPushButton:pressed{background:#CBD5E1;}"
-    );
-    setWindowOpacity(0.85);
     resize(720, 480);
+    applyThemedPopupWindow(this, config_);
     buildUi();
     renderCurrentWeapon();
 }
@@ -77,7 +68,8 @@ void SpecialWeaponDebuggerWindow::buildUi() {
     ll->setSpacing(8);
 
     auto* title = new QLabel(QStringLiteral("特殊武器"), this);
-    title->setStyleSheet("font-size:17px;font-weight:700;");
+    const auto theme = currentUiTheme(config_);
+    title->setStyleSheet(QStringLiteral("font-size:17px;font-weight:700;color:%1;").arg(theme.button_text));
     ll->addWidget(title);
 
     weapon_combo_ = new QComboBox(this);
@@ -107,18 +99,20 @@ void SpecialWeaponDebuggerWindow::buildUi() {
 
     status_label_ = new QLabel(QStringLiteral("就绪"), this);
     status_label_->setWordWrap(true);
-    status_label_->setStyleSheet("color:#1D4ED8;font-size:12px;font-weight:700;");
+    status_label_->setStyleSheet(QStringLiteral("color:%1;font-size:12px;font-weight:700;").arg(theme.accent));
     ll->addWidget(status_label_);
     ll->addStretch();
 
     auto* hint = new QLabel(QStringLiteral("操作提示\n- 拖拽控制点：修改数值\n- Ctrl + 点击：多选控制点\n- Ctrl + Z：撤回上一次拖动\n- 按住 X/Y：锁定对应轴\n- 左键双击空白：新增控制点\n- 右键双击控制点：删除"), this);
     hint->setWordWrap(true);
-    hint->setStyleSheet("color:#111827;font-size:12px;background:#F8FAFC;border:1px solid #D1D5DB;border-radius:6px;padding:8px;");
+    hint->setStyleSheet(QStringLiteral("color:%1;font-size:12px;%2padding:8px;").arg(theme.button_text, themedPanelStyle(theme)));
     ll->addWidget(hint);
 
     curve_editor_ = new CurveEditor(this);
     right_panel_ = curve_editor_;
-    right_panel_->setStyleSheet("background:#FFFFFF;border:1px solid #E5E7EB;color:#6B7280;");
+    right_panel_->setStyleSheet(themedPanelStyle(theme));
+    curve_editor_->setThemeColors(QColor(theme.panel), QColor(theme.border), QColor(theme.label),
+                                  QColor(theme.button_text), QColor(theme.field));
     root->addWidget(left);
     root->addWidget(right_panel_, 1);
 
@@ -151,8 +145,19 @@ void SpecialWeaponDebuggerWindow::renderCurrentWeapon() {
     else if (w == "VSS") bindCurve("vss_config", "calib_dists", "calib_drops_ratio", QColor("#16A34A"), QStringLiteral("下坠比例"));
     else if (w == QStringLiteral("十字弩")) bindCurve("crossbow_config", "calib_dists", "calib_drops_ratio", QColor("#EA580C"), QStringLiteral("下坠比例"));
     else if (w == QStringLiteral("投掷物")) bindThrowables(throw_mode_combo_->currentText() == QStringLiteral("跳投"));
-    else if (w == QStringLiteral("迫击炮")) bindParams("mortar_config", {{"a_param", QStringLiteral("上坠修正 a")}, {"b_param", QStringLiteral("下坠修正 b")}});
-    else if (w == "C4") bindParams("c4_config", {{"target_speed", QStringLiteral("推荐起步速度 km/h")}, {"jump_distance_threshold", QStringLiteral("推荐跳车距离 m")}});
+    else if (w == QStringLiteral("迫击炮")) bindParams("mortar_config", {
+        {"a_param", QStringLiteral("上坠修正 a"), 4.5},
+        {"b_param", QStringLiteral("下坠修正 b"), 4.5},
+        {"direction_auto_aim_kp", QStringLiteral("方向 PID - Kp"), 0.045},
+        {"direction_auto_aim_ki", QStringLiteral("方向 PID - Ki"), 0.0},
+        {"direction_auto_aim_kd", QStringLiteral("方向 PID - Kd"), 0.012},
+        {"direction_auto_aim_step_delay_ms", QStringLiteral("方向 PID - 间隔 ms"), 2.0},
+        {"direction_auto_aim_max_step_px", QStringLiteral("方向 PID - 单步上限 px"), 80.0},
+    });
+    else if (w == "C4") bindParams("c4_config", {
+        {"target_speed", QStringLiteral("推荐起步速度 km/h"), 60.0},
+        {"jump_distance_threshold", QStringLiteral("推荐跳车距离 m"), 20.0},
+    });
     status_label_->setText(QStringLiteral("当前：") + w);
 }
 
@@ -208,21 +213,21 @@ void SpecialWeaponDebuggerWindow::bindThrowables(bool jump) {
     });
 }
 
-void SpecialWeaponDebuggerWindow::bindParams(const std::string& config_key, const std::vector<std::pair<std::string, QString>>& fields) {
+void SpecialWeaponDebuggerWindow::bindParams(const std::string& config_key, const std::vector<ParamField>& fields) {
     active_config_ = config_key;
     active_x_.clear();
     active_y_.clear();
     auto* panel = new QWidget(this);
-    panel->setStyleSheet("background:#FFFFFF;color:#030712;QLineEdit{background:#FFFFFF;color:#030712;border:1px solid #9CA3AF;border-radius:4px;padding:3px 6px;}");
+    panel->setStyleSheet(themedWidgetStyle(currentUiTheme(config_)));
     auto* form = new QFormLayout(panel);
     const auto cfg = config_.read([&](const Json& data) {
         return data.value(config_key, Json::object());
     });
-    for (const auto& [key, label] : fields) {
+    for (const auto& field : fields) {
         auto* edit = new QLineEdit(panel);
-        edit->setText(QString::number(cfg.value(key, 0.0)));
-        param_edits_[key] = edit;
-        form->addRow(label, edit);
+        edit->setText(QString::number(cfg.value(field.key, field.fallback)));
+        param_edits_[field.key] = edit;
+        form->addRow(field.label, edit);
     }
     layout()->replaceWidget(right_panel_, panel);
     right_panel_->hide();

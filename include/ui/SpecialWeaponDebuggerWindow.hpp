@@ -24,7 +24,12 @@ private:
     void saveAndApply();
     void bindCurve(const std::string& config_key, const std::string& x_key, const std::string& y_key, const QColor& color, const QString& label);
     void bindThrowables(bool jump);
-    void bindParams(const std::string& config_key, const std::vector<std::pair<std::string, QString>>& fields);
+    struct ParamField {
+        std::string key;
+        QString label;
+        double fallback = 0.0;
+    };
+    void bindParams(const std::string& config_key, const std::vector<ParamField>& fields);
     void addPoint();
 
     Config& config_;

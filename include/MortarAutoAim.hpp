@@ -35,7 +35,7 @@ private:
     };
 
     void run(std::string selected_color);
-    void alignDirection(const std::string& selected_color);
+    void alignDirection(const std::string& selected_color, std::atomic_bool& stop_requested);
     [[nodiscard]] std::optional<double> selectedMarkerOffset(const std::string& selected_color) const;
     [[nodiscard]] std::optional<double> targetDistance(const std::string& selected_color) const;
     [[nodiscard]] std::vector<Step> loadSteps() const;
@@ -47,6 +47,7 @@ private:
     [[nodiscard]] double directionKi() const;
     [[nodiscard]] double directionKd() const;
     [[nodiscard]] int directionStepDelayMs() const;
+    [[nodiscard]] double directionMaxStepPx() const;
     [[nodiscard]] Step nearestStep(double distance) const;
     static void tapKey(int vk, int delay_ms);
     static void holdKey(int vk, int hold_ms);

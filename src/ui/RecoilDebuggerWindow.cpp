@@ -10,6 +10,8 @@
 #include <algorithm>
 #include <cmath>
 
+#include "ui/Theme.hpp"
+
 namespace pubg::ui {
 
 namespace {
@@ -56,22 +58,8 @@ double sampleSortedCurve(const std::vector<std::pair<double, double>>& points, d
 RecoilDebuggerWindow::RecoilDebuggerWindow(Config& config, RecoilControl& recoil, QWidget* parent)
     : QWidget(parent), config_(config), recoil_(recoil) {
     setWindowTitle(QStringLiteral("压枪参数调试"));
-    setObjectName("recoilDbgRoot");
-    setStyleSheet(
-        "#recoilDbgRoot{background:#FFFFFF;}"
-        "QLabel{color:#030712;font-family:'Microsoft YaHei';}"
-        "QComboBox{background:#FFFFFF;color:#030712;border:1px solid #9CA3AF;border-radius:4px;padding:2px 6px;selection-background-color:#DBEAFE;selection-color:#030712;}"
-        "QComboBox QAbstractItemView{background:#FFFFFF;color:#030712;border:1px solid #9CA3AF;selection-background-color:#DBEAFE;selection-color:#030712;}"
-        "QScrollBar:vertical{background:#FFFFFF;width:10px;margin:0;border:0;}"
-        "QScrollBar::handle:vertical{background:#CBD5E1;border-radius:5px;min-height:20px;}"
-        "QScrollBar::add-line:vertical,QScrollBar::sub-line:vertical{height:0;background:#FFFFFF;}"
-        "QLineEdit{background:#FFFFFF;color:#030712;border:1px solid #9CA3AF;border-radius:4px;padding:3px 6px;}"
-        "QPushButton{background:#EEF2F7;color:#030712;border:1px solid #9CA3AF;border-radius:5px;padding:6px 0;}"
-        "QPushButton:hover{background:#E2E8F0;}"
-        "QPushButton:pressed{background:#CBD5E1;}"
-    );
-    setWindowOpacity(0.85);
     resize(760, 520);
+    applyThemedPopupWindow(this, config_);
     buildUi();
     reloadOptions();
 }
@@ -88,7 +76,8 @@ void RecoilDebuggerWindow::buildUi() {
     ll->setSpacing(8);
 
     auto* title = new QLabel(QStringLiteral("压枪参数调试"), this);
-    title->setStyleSheet("font-size:17px;font-weight:700;");
+    const auto theme = currentUiTheme(config_);
+    title->setStyleSheet(QStringLiteral("font-size:17px;font-weight:700;color:%1;").arg(theme.button_text));
     ll->addWidget(title);
 
     auto* form = new QFormLayout();
@@ -132,43 +121,41 @@ void RecoilDebuggerWindow::buildUi() {
     ll->addLayout(button_grid);
     status_label_ = new QLabel(QStringLiteral("就绪"), this);
     status_label_->setWordWrap(true);
-    status_label_->setStyleSheet("color:#1D4ED8;font-size:12px;font-weight:700;");
+    status_label_->setStyleSheet(QStringLiteral("color:%1;font-size:12px;font-weight:700;").arg(theme.accent));
     ll->addWidget(status_label_);
     ll->addStretch();
 
     auto* hint = new QLabel(QStringLiteral("操作提示\n- 拖拽控制点：修改数值\n- Ctrl + 点击：多选控制点\n- Ctrl + Z：撤回上一次拖动\n- 按住 X/Y：锁定对应轴\n- 双击空白：新增控制点\n- 右键双击控制点：删除"), this);
     hint->setWordWrap(true);
-    hint->setStyleSheet("color:#111827;font-size:12px;background:#F8FAFC;border:1px solid #D1D5DB;border-radius:6px;padding:8px;");
+    hint->setStyleSheet(QStringLiteral("color:%1;font-size:12px;%2padding:8px;").arg(theme.button_text, themedPanelStyle(theme)));
     ll->addWidget(hint);
     root->addWidget(left);
 
     curve_editor_ = new CurveEditor(this);
-    curve_editor_->setStyleSheet("background:#F8FAFC;border:1px solid #E5E7EB;");
+    curve_editor_->setStyleSheet(themedPanelStyle(theme));
+    curve_editor_->setThemeColors(QColor(theme.panel), QColor(theme.border), QColor(theme.label),
+                                  QColor(theme.button_text), QColor(theme.field));
     right_panel_ = curve_editor_;
     root->addWidget(right_panel_, 1);
 
     dmr_panel_ = new QWidget(this);
-    dmr_panel_->setStyleSheet("background:#F8FAFC;border:1px solid #E5E7EB;");
+    dmr_panel_->setStyleSheet(themedPanelStyle(theme));
     auto* dmr_layout = new QVBoxLayout(dmr_panel_);
     dmr_layout->setContentsMargins(28, 28, 28, 28);
     dmr_layout->setSpacing(12);
     auto* dmr_title = new QLabel(QStringLiteral("射手步枪单点压枪力度"), dmr_panel_);
-    dmr_title->setStyleSheet("font-size:18px;font-weight:700;color:#030712;");
+    dmr_title->setStyleSheet(QStringLiteral("font-size:18px;font-weight:700;color:%1;").arg(theme.button_text));
     dmr_layout->addWidget(dmr_title);
     auto* dmr_desc = new QLabel(QStringLiteral("射手步枪只在每次左键按下时补偿一次，因此这里使用单个滑块，不绘制时间曲线。"), dmr_panel_);
     dmr_desc->setWordWrap(true);
-    dmr_desc->setStyleSheet("font-size:13px;color:#374151;");
+    dmr_desc->setStyleSheet(QStringLiteral("font-size:13px;color:%1;").arg(theme.label));
     dmr_layout->addWidget(dmr_desc);
     dmr_value_label_ = new QLabel(dmr_panel_);
-    dmr_value_label_->setStyleSheet("font-size:28px;font-weight:800;color:#111827;");
+    dmr_value_label_->setStyleSheet(QStringLiteral("font-size:28px;font-weight:800;color:%1;").arg(theme.button_text));
     dmr_layout->addWidget(dmr_value_label_);
     dmr_slider_ = new QSlider(Qt::Horizontal, dmr_panel_);
     dmr_slider_->setRange(0, 400);
-    dmr_slider_->setStyleSheet(
-        "QSlider::groove:horizontal{height:8px;background:#E5E7EB;border-radius:4px;}"
-        "QSlider::handle:horizontal{width:18px;height:18px;background:#2563EB;border-radius:9px;margin:-6px 0;}"
-        "QSlider::sub-page:horizontal{background:#93C5FD;border-radius:4px;}"
-    );
+    dmr_slider_->setStyleSheet(themedSliderStyle(currentUiTheme(config_)));
     dmr_layout->addWidget(dmr_slider_);
     dmr_layout->addStretch();
     dmr_panel_->hide();

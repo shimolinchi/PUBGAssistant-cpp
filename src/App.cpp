@@ -87,7 +87,10 @@ App::App()
     assistant_enabled_ = {
         {"mortar", true}, {"rocket", true}, {"throwables", true},
         {"vss", true}, {"crossbow", true}, {"c4", true},
+        {"auto_recoil", true}, {"dmr_tap", true},
+        {"sr_breath", true}, {"sg_peek", true},
     };
+    loadUiState();
     wireCallbacks();
     PUBG_HEAP_PROBE("ctor.afterWireCallbacks");
 }
@@ -256,7 +259,7 @@ void App::registerHotkeys() {
             map_points_->setEnabled(false);
         }
     });
-    hotkeys_.addStateWatcher("cancel_map_helpers", InputController::parseVirtualKey("m"), [this](bool pressed) {
+    hotkeys_.addStateWatcher("cancel_map_helpers", hotkeyVk("open_large_map", "m"), [this](bool pressed) {
         if (!pressed) {
             return;
         }
@@ -270,8 +273,11 @@ void App::registerHotkeys() {
     hotkeys_.addStateWatcher("mortar_interact", InputController::parseVirtualKey("f"), [this](bool pressed) {
         handleMortarInteractKey(pressed);
     });
-    hotkeys_.addStateWatcher("manual_game_minimap", InputController::parseVirtualKey("n"), [this](bool pressed) {
+    hotkeys_.addStateWatcher("manual_game_minimap", hotkeyVk("game_minimap", "n"), [this](bool pressed) {
         handleManualGameMinimapToggle(pressed);
+    });
+    hotkeys_.addStateWatcher("game_menu_escape", VK_ESCAPE, [this](bool pressed) {
+        handleEscapeKey(pressed);
     });
     hotkeys_.addStateWatcher("alt", VK_MENU, [this](bool pressed) {
         std::lock_guard lock(state_mutex_);
@@ -403,6 +409,18 @@ void App::migrateLegacyDefaultHotkeys() {
             hotkeys["mortar_auto_aim"] = "mouse_right";
             changed = true;
         }
+        if (!hotkeys.contains("game_minimap") || !hotkeys["game_minimap"].is_string()) {
+            hotkeys["game_minimap"] = "n";
+            changed = true;
+        }
+        if (!hotkeys.contains("hip_aim_key") || !hotkeys["hip_aim_key"].is_string()) {
+            hotkeys["hip_aim_key"] = "mouse_right";
+            changed = true;
+        }
+        if (!hotkeys.contains("open_large_map") || !hotkeys["open_large_map"].is_string()) {
+            hotkeys["open_large_map"] = "m";
+            changed = true;
+        }
         if (hotkeys.value("fire_key", std::string("end")) == hotkeys.value("toggle_window", std::string("<home>"))) {
             hotkeys["fire_key"] = "end";
             hotkeys["toggle_window"] = "<home>";
@@ -428,6 +446,50 @@ void App::syncMarkerColorsFromConfig() {
     }
 }
 
+void App::loadUiState() {
+    const Json ui = config_.read([](const Json& data) {
+        return data.value("ui_state", Json::object());
+    });
+    const Json switches = ui.value("switches", Json::object());
+    std::string marker_color;
+    {
+        std::lock_guard lock(state_mutex_);
+        weapon_detection_enabled_ = switches.value("weapon_detection", true);
+        display_enabled_ = switches.value("display", false);
+        recoil_enabled_ = switches.value("recoil", false);
+        if (ui.contains("current_marker_color") && ui["current_marker_color"].is_string()) {
+            current_marker_color_ = ui["current_marker_color"].get<std::string>();
+        }
+        marker_color = current_marker_color_;
+        const Json assistants = ui.value("assistants", Json::object());
+        for (auto& [key, value] : assistant_enabled_) {
+            value = assistants.value(key, value);
+        }
+    }
+    if (throwables_) {
+        throwables_->setSelectedColor(marker_color);
+    }
+    if (c4_) {
+        c4_->setSelectedColor(marker_color);
+    }
+    if (status_hud_) {
+        status_hud_->setMarkerColor(marker_color);
+    }
+    if (recoil_) {
+        for (const auto& key : {"auto_recoil", "dmr_tap", "sr_breath", "sg_peek"}) {
+            auto it = assistant_enabled_.find(key);
+            recoil_->setFeatureEnabled(key, it == assistant_enabled_.end() ? true : it->second);
+        }
+    }
+}
+
+void App::saveSwitchState(const std::string& key, bool enabled) {
+    config_.write([&](Json& data) {
+        data["ui_state"]["switches"][key] = enabled;
+    });
+    config_.save();
+}
+
 void App::setWeaponDetectionEnabled(bool enabled) {
     std::lock_guard control_lock(control_mutex_);
     {
@@ -437,6 +499,7 @@ void App::setWeaponDetectionEnabled(bool enabled) {
     if (main_window_) {
         QMetaObject::invokeMethod(main_window_, [this, enabled] { main_window_->setWeaponDetectionState(enabled); }, Qt::QueuedConnection);
     }
+    saveSwitchState("weapon_detection", enabled);
     weapon_detector_->setEnabled(enabled);
     equipment_detector_->setEnabled(enabled);
     gesture_identifier_->setEnabled(enabled);
@@ -461,6 +524,7 @@ void App::setDisplayEnabled(bool enabled) {
     if (main_window_) {
         QMetaObject::invokeMethod(main_window_, [this, enabled] { main_window_->setDisplayState(enabled); }, Qt::QueuedConnection);
     }
+    saveSwitchState("display", enabled);
     if (!enabled) {
         closeGameMinimapForAssist();
         setSpecialDisplayActive(false);
@@ -487,6 +551,7 @@ void App::setRecoilEnabled(bool enabled) {
     if (main_window_) {
         QMetaObject::invokeMethod(main_window_, [this, enabled] { main_window_->setRecoilState(enabled); }, Qt::QueuedConnection);
     }
+    saveSwitchState("recoil", enabled);
     recoil_->setEnabled(enabled);
     if (!enabled) {
         recoil_->updateCurrentWeapon("");
@@ -537,6 +602,10 @@ void App::cycleMarkerColor(int direction) {
     }
     throwables_->setSelectedColor(color);
     c4_->setSelectedColor(color);
+    config_.write([&](Json& data) {
+        data["ui_state"]["current_marker_color"] = color;
+    });
+    config_.save();
     if (status_hud_) {
         status_hud_->setMarkerColor(color);
     }
@@ -555,12 +624,22 @@ void App::applyWeaponUpdate(const std::string& weapon, double score) {
     bool recoil_enabled = false;
     std::string previous_weapon;
     bool ignore_empty_special_jitter = false;
+    bool leaving_mortar_hold = false;
     {
         std::lock_guard lock(state_mutex_);
         previous_weapon = current_weapon_;
         ignore_empty_special_jitter = weapon.empty() && special_display_active_ &&
                                       shouldAutoUseMinimapForWeapon(previous_weapon);
         if (!ignore_empty_special_jitter) {
+            if (hold_mortar_until_reacquired_ && weapon.empty()) {
+                pending_weapon_update_.reset();
+                return;
+            }
+            if (hold_mortar_until_reacquired_ && weapon != "Mortar") {
+                hold_mortar_until_reacquired_ = false;
+                mortar_mounted_ = false;
+                leaving_mortar_hold = true;
+            }
             current_weapon_ = weapon;
             recoil_enabled = recoil_enabled_;
         }
@@ -570,6 +649,10 @@ void App::applyWeaponUpdate(const std::string& weapon, double score) {
         std::cout << "[weapon] ignore empty special jitter after " << previous_weapon
                   << " score=" << score << "\n";
         return;
+    }
+    if (leaving_mortar_hold) {
+        ++mortar_mount_session_;
+        joinMortarMountWorker();
     }
     if (isRecoilWeapon(weapon)) {
         recoil_->updateCurrentWeapon(weapon);
@@ -660,6 +743,8 @@ void App::syncRecoilAttachmentsForCurrentWeapon() {
 
 void App::setAssistantEnabled(const std::string& key, bool enabled) {
     std::lock_guard control_lock(control_mutex_);
+    const bool recoil_feature =
+        key == "auto_recoil" || key == "dmr_tap" || key == "sr_breath" || key == "sg_peek";
     std::string current_weapon;
     bool disabling_mortar = false;
     {
@@ -672,11 +757,23 @@ void App::setAssistantEnabled(const std::string& key, bool enabled) {
             disabling_mortar = true;
         }
     }
+    config_.write([&](Json& data) {
+        data["ui_state"]["assistants"][key] = enabled;
+    });
+    config_.save();
+    if (recoil_feature && recoil_) {
+        recoil_->setFeatureEnabled(key, enabled);
+    }
     if (disabling_mortar) {
         closeGameMinimapForAssist();
         if (!shouldAutoUseMinimapForWeapon(current_weapon)) {
             setSpecialDisplayActive(false);
         }
+    }
+    if (recoil_feature) {
+        updateStatusHud();
+        printStatus();
+        return;
     }
     updateSpecialWeaponMinimapState(current_weapon, current_weapon);
     updateAssistantRouting();
@@ -692,10 +789,23 @@ bool App::shouldRunSpecialAssistantsForWeapon(const std::string& weapon) const {
 }
 
 void App::toggleGameMinimap() {
-    const int vk = InputController::parseVirtualKey("n");
+    const int vk = hotkeyVk("game_minimap", "n");
+    if (!vk) {
+        return;
+    }
     InputController::keyDown(vk);
     std::this_thread::sleep_for(std::chrono::milliseconds(20));
     InputController::keyUp(vk);
+}
+
+bool App::gameMenuInputSuppressed() const {
+    std::lock_guard lock(state_mutex_);
+    return game_menu_active_ || nowSeconds() < game_menu_input_suppress_until_;
+}
+
+bool App::shouldHoldMortarStateAfterEsc() const {
+    std::lock_guard lock(state_mutex_);
+    return hold_mortar_until_reacquired_;
 }
 
 void App::openGameMinimapForAssist() {
@@ -714,6 +824,9 @@ void App::closeGameMinimapForAssist() {
     bool should_toggle = false;
     {
         std::lock_guard lock(state_mutex_);
+        if (game_menu_active_ || nowSeconds() < game_menu_input_suppress_until_) {
+            return;
+        }
         should_toggle = game_minimap_opened_by_app_;
         game_minimap_opened_by_app_ = false;
     }
@@ -776,6 +889,20 @@ void App::handleManualGameMinimapToggle(bool pressed) {
         setSpecialDisplayActive(true);
         updateAssistantRouting();
         updateStatusHud();
+    }
+}
+
+void App::handleEscapeKey(bool pressed) {
+    std::lock_guard lock(state_mutex_);
+    if (pressed) {
+        game_menu_active_ = true;
+        game_menu_input_suppress_until_ = nowSeconds() + 2.0;
+        if (mortar_mounted_) {
+            hold_mortar_until_reacquired_ = true;
+        }
+    } else {
+        game_menu_active_ = false;
+        game_menu_input_suppress_until_ = nowSeconds() + 0.45;
     }
 }
 
@@ -880,7 +1007,11 @@ void App::handleMortarInteractKey(bool pressed) {
     if (!display_enabled || !mortar_allowed) {
         return;
     }
-    if (mounted || special_display_active) {
+    if (mounted) {
+        {
+            std::lock_guard lock(state_mutex_);
+            hold_mortar_until_reacquired_ = false;
+        }
         setMortarMounted(false);
         return;
     }
@@ -924,17 +1055,33 @@ void App::startMortarMountConfirmation() {
             while (session == mortar_mount_session_.load()) {
                 bool display_enabled = false;
                 bool mortar_allowed = false;
+                bool menu_suppressed = false;
+                bool hold_after_esc = false;
                 {
                     std::lock_guard lock(state_mutex_);
                     display_enabled = display_enabled_;
                     mortar_allowed = assistant_enabled_["mortar"];
+                    menu_suppressed = game_menu_active_ || nowSeconds() < game_menu_input_suppress_until_;
+                    hold_after_esc = hold_mortar_until_reacquired_;
                 }
                 if (!display_enabled || !mortar_allowed || !mortar_mount_detector_) {
                     break;
                 }
+                if (menu_suppressed) {
+                    missed_frames = 0;
+                    std::this_thread::sleep_for(std::chrono::milliseconds(120));
+                    continue;
+                }
                 if (mortar_mount_detector_->detectMounted()) {
                     missed_frames = 0;
+                    std::lock_guard lock(state_mutex_);
+                    hold_mortar_until_reacquired_ = false;
                 } else {
+                    if (hold_after_esc) {
+                        missed_frames = 0;
+                        std::this_thread::sleep_for(std::chrono::milliseconds(120));
+                        continue;
+                    }
                     ++missed_frames;
                     if (missed_frames >= 2) {
                         break;
@@ -943,6 +1090,9 @@ void App::startMortarMountConfirmation() {
                 std::this_thread::sleep_for(std::chrono::milliseconds(80));
             }
             if (session == mortar_mount_session_.load()) {
+                if (shouldHoldMortarStateAfterEsc()) {
+                    return;
+                }
                 applyMortarMounted(false);
             }
         });
@@ -972,6 +1122,7 @@ void App::applyMortarMounted(bool mounted) {
         mortar_allowed = it != assistant_enabled_.end() && it->second;
         if (mounted) {
             current_weapon_ = "Mortar";
+            hold_mortar_until_reacquired_ = false;
             manual_special_display_suppressed_ = false;
             manual_minimap_toggle_ignore_until_ = 0.0;
             pending_weapon_update_.reset();
@@ -992,6 +1143,7 @@ void App::applyMortarMounted(bool mounted) {
             std::lock_guard lock(state_mutex_);
             current_weapon_.clear();
             pending_weapon_update_.reset();
+            hold_mortar_until_reacquired_ = false;
             manual_special_display_suppressed_ = false;
             manual_minimap_toggle_ignore_until_ = 0.0;
         }
@@ -1121,7 +1273,18 @@ int App::run() {
     std::cout << "F1 weapon detection, F2 display, F3 recoil, configured equipment scan key.\n";
     PUBG_HEAP_PROBE("run.start");
     syncMarkerColorsFromConfig();
-    setWeaponDetectionEnabled(true);
+    bool initial_weapon_detection = false;
+    bool initial_display = false;
+    bool initial_recoil = false;
+    {
+        std::lock_guard lock(state_mutex_);
+        initial_weapon_detection = weapon_detection_enabled_;
+        initial_display = display_enabled_;
+        initial_recoil = recoil_enabled_;
+    }
+    setWeaponDetectionEnabled(initial_weapon_detection);
+    setDisplayEnabled(initial_display);
+    setRecoilEnabled(initial_recoil);
     PUBG_HEAP_PROBE("run.afterEnableDetection");
     pubg::ui::MainWindow::ControlCallbacks callbacks;
     callbacks.set_weapon_detection = [this](bool enabled) { setWeaponDetectionEnabled(enabled); };
@@ -1129,6 +1292,7 @@ int App::run() {
     callbacks.set_recoil = [this](bool enabled) { setRecoilEnabled(enabled); };
     callbacks.set_assistant = [this](const std::string& key, bool enabled) { setAssistantEnabled(key, enabled); };
     callbacks.sync_marker_colors = [this] { syncMarkerColorsFromConfig(); };
+    callbacks.refresh_status_hud = [this] { updateStatusHud(); };
     callbacks.reload_hotkeys = [this] { reloadHotkeys(); };
     callbacks.shutdown = [this] { shutdown(); };
     pubg::ui::MainWindow window(config_, *regions_, *minimap_, *elevation_, *weapon_detector_,

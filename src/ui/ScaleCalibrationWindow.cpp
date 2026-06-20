@@ -20,6 +20,7 @@
 
 #include "ScreenCapture.hpp"
 #include "TemplateMatcher.hpp"
+#include "ui/Theme.hpp"
 
 namespace pubg::ui {
 
@@ -34,10 +35,6 @@ QLabel* makePreviewLabel(QWidget* parent) {
     auto* label = new QLabel(parent);
     label->setFixedSize(kPreviewWidth, kPreviewHeight);
     label->setAlignment(Qt::AlignCenter);
-    label->setStyleSheet(
-        "background:#FFFFFF;color:#111827;border:1px solid #CBD5E1;"
-        "border-radius:6px;font-size:12px;font-weight:700;"
-    );
     return label;
 }
 
@@ -229,21 +226,9 @@ struct BoolGuard {
 ScaleCalibrationWindow::ScaleCalibrationWindow(Config& config, RegionManager& regions, QWidget* parent)
     : QWidget(parent), config_(config), regions_(regions) {
     setWindowTitle(QStringLiteral("截图区域缩放比例校准"));
-    setObjectName("scaleCalibRoot");
-    setStyleSheet(
-        "#scaleCalibRoot{background:#FFFFFF;}"
-        "QLabel{color:#030712;font-family:'Microsoft YaHei';}"
-        "QComboBox,QLineEdit{background:#FFFFFF;color:#030712;border:1px solid #9CA3AF;border-radius:4px;padding:3px 6px;selection-background-color:#DBEAFE;selection-color:#030712;}"
-        "QComboBox QAbstractItemView{background:#FFFFFF;color:#030712;border:1px solid #9CA3AF;selection-background-color:#DBEAFE;selection-color:#030712;}"
-        "QSlider::groove:horizontal{height:8px;background:#E5E7EB;border-radius:4px;}"
-        "QSlider::sub-page:horizontal{background:#93C5FD;border-radius:4px;}"
-        "QSlider::handle:horizontal{background:#FFFFFF;border:1px solid #64748B;width:18px;margin:-6px 0;border-radius:9px;}"
-        "QPushButton{background:#EEF2F7;color:#030712;border:1px solid #9CA3AF;border-radius:5px;padding:5px 8px;}"
-        "QPushButton:hover{background:#E2E8F0;}"
-        "QPushButton:pressed{background:#CBD5E1;}"
-    );
-    setWindowOpacity(0.85);
     resize(710, 390);
+    applyThemedPopupWindow(this, config_);
+    setStyleSheet(styleSheet() + themedSliderStyle(currentUiTheme(config_)));
     buildUi();
     loadRegion();
     refresh_timer_ = new QTimer(this);
@@ -281,7 +266,8 @@ void ScaleCalibrationWindow::buildUi() {
     root->setSpacing(9);
 
     auto* title = new QLabel(QStringLiteral("截图区域缩放比例校准"), this);
-    title->setStyleSheet("font-size:16px;font-weight:700;color:#111827;");
+    const auto theme = currentUiTheme(config_);
+    title->setStyleSheet(QStringLiteral("font-size:16px;font-weight:700;color:%1;").arg(theme.button_text));
     root->addWidget(title);
 
     auto* top = new QHBoxLayout();
@@ -335,16 +321,18 @@ void ScaleCalibrationWindow::buildUi() {
     auto* template_col = new QVBoxLayout();
     template_col->setSpacing(6);
     auto* template_title = new QLabel(QStringLiteral("模板处理图"), this);
-    template_title->setStyleSheet("font-size:13px;font-weight:700;color:#111827;");
+    template_title->setStyleSheet(QStringLiteral("font-size:13px;font-weight:700;color:%1;").arg(theme.button_text));
     template_preview_ = makePreviewLabel(this);
+    template_preview_->setStyleSheet(QStringLiteral("%1font-size:12px;font-weight:700;").arg(themedPanelStyle(theme)));
     template_col->addWidget(template_title);
     template_col->addWidget(template_preview_);
 
     auto* capture_col = new QVBoxLayout();
     capture_col->setSpacing(6);
     auto* capture_title = new QLabel(QStringLiteral("截图处理图"), this);
-    capture_title->setStyleSheet("font-size:13px;font-weight:700;color:#111827;");
+    capture_title->setStyleSheet(QStringLiteral("font-size:13px;font-weight:700;color:%1;").arg(theme.button_text));
     capture_preview_ = makePreviewLabel(this);
+    capture_preview_->setStyleSheet(QStringLiteral("%1font-size:12px;font-weight:700;").arg(themedPanelStyle(theme)));
     capture_col->addWidget(capture_title);
     capture_col->addWidget(capture_preview_);
     preview_row->addLayout(template_col);
@@ -353,7 +341,7 @@ void ScaleCalibrationWindow::buildUi() {
 
     result_label_ = new QLabel(QStringLiteral("截图实时刷新中"), this);
     result_label_->setWordWrap(true);
-    result_label_->setStyleSheet("color:#111827;font-size:12px;font-weight:700;");
+    result_label_->setStyleSheet(QStringLiteral("color:%1;font-size:12px;font-weight:700;").arg(theme.button_text));
     root->addWidget(result_label_);
 
     connect(region_combo_, &QComboBox::currentIndexChanged, this, [this] { loadRegion(); });

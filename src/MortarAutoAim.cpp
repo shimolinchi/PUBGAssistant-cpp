@@ -136,7 +136,13 @@ double MortarAutoAim::directionKd() const {
 
 int MortarAutoAim::directionStepDelayMs() const {
     return config_.read([](const Json& data) {
-        return data.value("mortar_config", Json::object()).value("direction_auto_aim_step_delay_ms", 12);
+        return data.value("mortar_config", Json::object()).value("direction_auto_aim_step_delay_ms", 2);
+    });
+}
+
+double MortarAutoAim::directionMaxStepPx() const {
+    return config_.read([](const Json& data) {
+        return data.value("mortar_config", Json::object()).value("direction_auto_aim_max_step_px", 80.0);
     });
 }
 
@@ -209,24 +215,25 @@ std::optional<double> MortarAutoAim::selectedMarkerOffset(const std::string& sel
     if (best_area <= 0.0) {
         return std::nullopt;
     }
-    const double marker_x = best_rect.x + best_rect.width * 0.5;
-    return marker_x - rect->width * 0.5;
+    const double marker_x = rect->left + best_rect.x + best_rect.width * 0.5;
+    return marker_x - regions_.screenWidth() * 0.5;
 }
 
-void MortarAutoAim::alignDirection(const std::string& selected_color) {
+void MortarAutoAim::alignDirection(const std::string& selected_color, std::atomic_bool& stop_requested) {
     const int max_ms = directionMaxMs();
     const int step_delay = std::max(1, directionStepDelayMs());
     const double tolerance = directionTolerancePx();
     const double kp = directionKp();
     const double ki = directionKi();
     const double kd = directionKd();
+    const double max_step = std::clamp(directionMaxStepPx(), 1.0, 500.0);
     const double deadline = nowSeconds() + max_ms / 1000.0;
     double integral = 0.0;
     double previous_error = 0.0;
     double last_time = nowSeconds();
     bool have_previous = false;
 
-    while (running_ && nowSeconds() < deadline) {
+    while (running_ && !stop_requested.load() && nowSeconds() < deadline) {
         const auto offset = selectedMarkerOffset(selected_color);
         if (!offset) {
             std::this_thread::sleep_for(std::chrono::milliseconds(step_delay));
@@ -244,7 +251,7 @@ void MortarAutoAim::alignDirection(const std::string& selected_color) {
         previous_error = error;
         have_previous = true;
         const double output = kp * error + ki * integral + kd * derivative;
-        int dx = static_cast<int>(std::round(std::clamp(output, -18.0, 18.0)));
+        int dx = static_cast<int>(std::round(std::clamp(output, -max_step, max_step)));
         if (dx == 0) {
             dx = error > 0 ? 1 : -1;
         }
@@ -298,12 +305,28 @@ void MortarAutoAim::run(std::string selected_color) {
               << " reset_w_ms=" << reset_hold_ms
               << " wheel_down=" << step.presses << "\n";
 
-    holdKey('W', reset_hold_ms);
-    std::this_thread::sleep_for(std::chrono::milliseconds(delay));
-    for (int i = 0; i < step.presses; ++i) {
-        wheelDown(delay);
+    std::atomic_bool stop_direction{false};
+    std::thread direction_worker([this, selected_color, &stop_direction] {
+        alignDirection(selected_color, stop_direction);
+    });
+
+    try {
+        holdKey('W', reset_hold_ms);
+        std::this_thread::sleep_for(std::chrono::milliseconds(delay));
+        for (int i = 0; i < step.presses; ++i) {
+            wheelDown(delay);
+        }
+    } catch (...) {
+        stop_direction = true;
+        if (direction_worker.joinable()) {
+            direction_worker.join();
+        }
+        finish();
+        throw;
     }
-    alignDirection(selected_color);
+    if (direction_worker.joinable()) {
+        direction_worker.join();
+    }
     finish();
 }
 

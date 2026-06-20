@@ -29,6 +29,8 @@ public:
 
     explicit CurveEditor(QWidget* parent = nullptr);
     void setCurves(std::vector<Curve> curves);
+    void setThemeColors(const QColor& background, const QColor& grid, const QColor& text,
+                        const QColor& axis, const QColor& point_outline);
     void setFixedXRange(double min_x, double max_x);
     void setFixedYRange(double min_y, double max_y);
     void setFixedRightYRange(double min_y, double max_y);
@@ -92,6 +94,11 @@ private:
     std::optional<double> fixed_right_max_y_;
     QString left_axis_label_;
     QString right_axis_label_;
+    QColor background_color_{"#F8FAFC"};
+    QColor grid_color_{"#E5E7EB"};
+    QColor text_color_{"#374151"};
+    QColor axis_color_{"#111827"};
+    QColor point_outline_color_{"#FFFFFF"};
 };
 
 } // namespace pubg::ui

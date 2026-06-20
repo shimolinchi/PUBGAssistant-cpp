@@ -65,4 +65,8 @@ std::filesystem::path ResourcePaths::iconFile() const {
     return root_ / "icon.ico";
 }
 
+std::filesystem::path ResourcePaths::readmePdfFile() const {
+    return root_ / "README.pdf";
+}
+
 } // namespace pubg

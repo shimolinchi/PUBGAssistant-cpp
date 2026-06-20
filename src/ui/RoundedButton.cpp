@@ -4,11 +4,30 @@
 
 namespace pubg::ui {
 
+namespace {
+QColor g_normal("#FFFFFF");
+QColor g_hover("#F4F7FB");
+QColor g_pressed("#D7DEE8");
+QColor g_active("#E8EEF6");
+QColor g_border("#FFFFFF");
+QColor g_text("#111827");
+} // namespace
+
 RoundedButton::RoundedButton(const QString& text, QWidget* parent) : QPushButton(text, parent) {
     setCursor(Qt::PointingHandCursor);
     setAttribute(Qt::WA_Hover, true);
     setFlat(true);
     refresh();
+}
+
+void RoundedButton::setThemeColors(const QString& normal, const QString& hover, const QString& pressed,
+                                   const QString& active, const QString& border, const QString& text) {
+    g_normal = QColor(normal);
+    g_hover = QColor(hover);
+    g_pressed = QColor(pressed);
+    g_active = QColor(active);
+    g_border = QColor(border);
+    g_text = QColor(text);
 }
 
 void RoundedButton::configure(int width, int height, int radius, int pixel_font_size) {
@@ -60,18 +79,18 @@ void RoundedButton::leaveEvent(QEvent* event) {
 }
 
 void RoundedButton::paintEvent(QPaintEvent*) {
-    QColor bg("#FFFFFF");
+    QColor bg = g_normal;
     if (pressed_) {
-        bg = QColor("#D7DEE8");
+        bg = g_pressed;
     } else if (active_) {
-        bg = QColor("#E8EEF6");
+        bg = g_active;
     } else if (hovered_) {
-        bg = QColor("#F4F7FB");
+        bg = g_hover;
     }
 
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing, true);
-    painter.setPen(QPen(QColor("#FFFFFF"), 1));
+    painter.setPen(QPen(g_border, 1));
     painter.setBrush(bg);
     const QRectF box = rect().adjusted(0.5, 0.5, -0.5, -0.5);
     painter.drawRoundedRect(box, radius_, radius_);
@@ -80,7 +99,7 @@ void RoundedButton::paintEvent(QPaintEvent*) {
     font.setPixelSize(pixel_font_size_);
     font.setWeight(QFont::Bold);
     painter.setFont(font);
-    painter.setPen(QColor("#111827"));
+    painter.setPen(g_text);
     painter.drawText(rect(), Qt::AlignCenter, text());
 }
 

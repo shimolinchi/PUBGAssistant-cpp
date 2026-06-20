@@ -33,6 +33,9 @@ public:
     // 根据当前屏幕尺寸生成准星检测区域，对应 Python 版自动同步 crosshair_region 的逻辑。
     void syncCrosshairRegion();
 
+    // 迫击炮方向自动瞄准使用的顶部方向条区域；老配置可能只有 detection_regions.compass_region。
+    void syncCompassRegion();
+
 private:
     Config& config_;
     int screen_w_ = 1920;

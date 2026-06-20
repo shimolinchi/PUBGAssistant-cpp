@@ -17,6 +17,20 @@ std::string oneDecimal(double value) {
     out << std::fixed << std::setprecision(1) << value;
     return out.str();
 }
+
+double displayValue(const Config& config, const char* key, double fallback) {
+    return config.read([&](const Json& data) {
+        return data.value("ui_state", Json::object()).value("display", Json::object()).value(key, fallback);
+    });
+}
+
+int assistTextSize(const Config& config, int fallback) {
+    return std::clamp(static_cast<int>(std::round(displayValue(config, "assist_text_size", fallback))), 12, 28);
+}
+
+int assistTextAlpha(const Config& config) {
+    return std::clamp(static_cast<int>(std::round(displayValue(config, "assist_text_alpha", 1.0) * 255.0)), 0, 255);
+}
 } // namespace
 
 ThrowablesAssistant::ThrowablesAssistant(Config& config, RegionManager& regions, MinimapRadar& minimap)
@@ -182,7 +196,7 @@ void ThrowablesAssistant::render() {
     cmds.push_back({OverlayCommand::Type::Line, cx - 30, y, cx + 30, y, 0, "", bgr, 1});
     cmds.push_back({OverlayCommand::Type::Text, cx + 34, y - 10, 0, 0, 0,
                     std::to_string(static_cast<int>(std::round(dist))) + "m",
-                    bgr, 1, 16});
+                    bgr, 1, assistTextSize(config_, 16), assistTextAlpha(config_)});
     constexpr double arc_span = 50.0 * std::numbers::pi / 180.0;
     const double clamped_cook = std::clamp(cook, 0.0, total_time);
     const double angle = arc_span * 0.5 - (clamped_cook / total_time) * arc_span;
@@ -196,7 +210,7 @@ void ThrowablesAssistant::render() {
                     mark_x - 2.0, mark_y, mark_x - 2.0 + vx / vlen * pointer_len,
                     mark_y + vy / vlen * pointer_len, 0, "", bgr, 2});
     cmds.push_back({OverlayCommand::Type::Text, mark_x + 10, mark_y - 7, 0, 0, 0,
-                    oneDecimal(cook) + "s", bgr, 1, 16});
+                    oneDecimal(cook) + "s", bgr, 1, assistTextSize(config_, 16), assistTextAlpha(config_)});
     overlay_.setCommands(std::move(cmds));
     overlay_.pumpMessages();
 }
