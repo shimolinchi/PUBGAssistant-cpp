@@ -4,17 +4,24 @@
 #include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QIcon>
+#include <QImage>
 #include <QApplication>
+#include <QDir>
 #include <QKeyEvent>
 #include <QFrame>
+#include <QFont>
 #include <QLineEdit>
 #include <QMargins>
 #include <QMouseEvent>
+#include <QPainter>
+#include <QPainterPath>
 #include <QPair>
+#include <QPixmap>
 #include <QPushButton>
 #include <QScreen>
 #include <QScrollArea>
 #include <QSet>
+#include <QSizePolicy>
 #include <QDesktopServices>
 #include <QEvent>
 #include <QStringList>
@@ -24,8 +31,14 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <fstream>
+#include <functional>
+#include <iterator>
 #include <tuple>
 #include <utility>
+#include <vector>
+
+#include <opencv2/imgcodecs.hpp>
 
 #include "ui/RecoilDebuggerWindow.hpp"
 #include "ui/RegionCalibrationOverlay.hpp"
@@ -68,11 +81,124 @@ private:
     QMargins margins_;
 };
 
+class HoverCallbackFilter final : public QObject {
+public:
+    HoverCallbackFilter(std::function<void()> callback, QObject* parent)
+        : QObject(parent), callback_(std::move(callback)) {}
+
+protected:
+    bool eventFilter(QObject* watched, QEvent* event) override {
+        if (event->type() == QEvent::Enter && callback_) {
+            callback_();
+        }
+        return QObject::eventFilter(watched, event);
+    }
+
+private:
+    std::function<void()> callback_;
+};
+
+class RoundedPreviewWidget final : public QWidget {
+public:
+    explicit RoundedPreviewWidget(QWidget* parent = nullptr) : QWidget(parent) {
+        setMinimumSize(480, 270);
+        setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+    }
+
+    void setColors(const QString& background, const QString& border, const QString& text) {
+        background_ = QColor(background);
+        border_ = QColor(border);
+        text_ = QColor(text);
+        update();
+    }
+
+    void setPreviewImage(const QImage& image) {
+        image_ = image;
+        update();
+    }
+
+    void setPixmap(const QPixmap& pixmap) {
+        image_ = pixmap.isNull() ? QImage{} : pixmap.toImage();
+        if (!pixmap.isNull()) {
+            message_.clear();
+        }
+        update();
+    }
+
+    void setMessage(const QString& message) {
+        message_ = message;
+        update();
+    }
+
+    void setText(const QString& text) {
+        message_ = text;
+        if (!text.isEmpty()) {
+            image_ = {};
+        }
+        update();
+    }
+
+protected:
+    void paintEvent(QPaintEvent*) override {
+        QPainter painter(this);
+        painter.setRenderHint(QPainter::Antialiasing, true);
+
+        const QRectF outer = rect().adjusted(0.5, 0.5, -0.5, -0.5);
+        QPainterPath outer_path;
+        outer_path.addRoundedRect(outer, 8, 8);
+        painter.fillPath(outer_path, background_);
+        painter.setPen(QPen(border_, 1));
+        painter.drawPath(outer_path);
+
+        const QRectF content = rect().adjusted(1.0, 1.0, -1.0, -1.0);
+        QPainterPath clip_path;
+        clip_path.addRoundedRect(content, 7, 7);
+        painter.setClipPath(clip_path);
+
+        if (!image_.isNull()) {
+            const QSize target_size = image_.size().scaled(content.size().toSize(), Qt::KeepAspectRatioByExpanding);
+            QRectF target(QPointF(0, 0), QSizeF(target_size));
+            target.moveCenter(content.center());
+            painter.drawImage(target, image_);
+            return;
+        }
+
+        painter.setClipping(false);
+        painter.setPen(text_);
+        QFont font(QStringLiteral("Microsoft YaHei"), 10);
+        font.setWeight(QFont::DemiBold);
+        painter.setFont(font);
+        painter.drawText(rect().adjusted(16, 12, -16, -12), Qt::AlignCenter | Qt::TextWordWrap, message_);
+    }
+
+private:
+    QColor background_ = QColor(255, 255, 255, 210);
+    QColor border_ = QColor(255, 255, 255);
+    QColor text_ = QColor(17, 24, 39);
+    QImage image_;
+    QString message_;
+};
+
 QIcon appIconFromPath(const std::filesystem::path& icon_path) {
     if (!std::filesystem::exists(icon_path)) {
         return {};
     }
     return QIcon(QString::fromStdWString(icon_path.wstring()));
+}
+
+cv::Mat loadPreviewImage(const QString& image_path) {
+    const std::filesystem::path path = std::filesystem::path(image_path.toStdWString());
+    std::ifstream file(path, std::ios::binary);
+    if (!file) {
+        return {};
+    }
+    std::vector<unsigned char> bytes(
+        (std::istreambuf_iterator<char>(file)),
+        std::istreambuf_iterator<char>());
+    if (bytes.empty()) {
+        return {};
+    }
+    return cv::imdecode(bytes, cv::IMREAD_UNCHANGED);
 }
 
 QString functionKeyFromNativeScanCode(quint32 scan_code) {
@@ -232,7 +358,7 @@ void MainWindow::buildUi() {
 
     buildMapTab(addTab(QStringLiteral("地图点位")));
     buildLaunchTab(addTab(QStringLiteral("启动助手")));
-    buildCalibrationTab(addTab(QStringLiteral("调试校准")));
+    buildCalibrationTab(addTab(QStringLiteral("系统设置")));
     buildHelpTab(addTab(QStringLiteral("使用说明")));
     applyTheme();
     selectTab(0);
@@ -241,6 +367,41 @@ void MainWindow::buildUi() {
         applyNativeRoundedRegion();
         applyCaptureExclusion();
     });
+}
+
+std::string regionDisplayName(const std::string& key) {
+    static const std::vector<std::pair<const char*, const char*>> names{
+        {"largemap_region", "大地图"},
+        {"minimap_region", "小地图"},
+        {"largemap_1km_px", "1km比例"},
+        {"weapon1_number_region", "武器1编号"},
+        {"weapon2_number_region", "武器2编号"},
+        {"elevation_region", "垂直测高"},
+        {"weapon1_name_region", "武器1名称"},
+        {"weapon2_name_region", "武器2名称"},
+        {"weapon_region", "武器图标"},
+        {"weapon1_scope_region", "武器1倍镜"},
+        {"weapon2_scope_region", "武器2倍镜"},
+        {"stance_region", "姿势区域"},
+        {"weapon1_muzzle_region", "武器1枪口"},
+        {"weapon2_muzzle_region", "武器2枪口"},
+        {"scope_top_edge_4x_region", "四倍镜内边"},
+        {"weapon1_grip_region", "武器1握把"},
+        {"weapon2_grip_region", "武器2握把"},
+        {"scope_top_edge_6x_region", "六倍镜内边"},
+        {"weapon1_stock_region", "武器1枪托"},
+        {"weapon2_stock_region", "武器2枪托"},
+        {"scope_top_edge_8x_region", "八倍镜内边"},
+        {"mortar_mount_region", "迫击炮上炮"},
+        {"compass_region", "顶部方向"},
+        {"crosshair_region", "准星区域"},
+    };
+    for (const auto& [name_key, display] : names) {
+        if (key == name_key) {
+            return display;
+        }
+    }
+    return key;
 }
 
 void showWindowInsideScreen(QWidget* window) {
@@ -445,7 +606,7 @@ void MainWindow::buildMapTab(QWidget* tab) {
         return data.value("ui_state", Json::object());
     });
     QStringList maps{QStringLiteral("艾伦格"), QStringLiteral("米拉玛"), QStringLiteral("泰戈"), QStringLiteral("荣都"), QStringLiteral("帝斯顿"), QStringLiteral("维寒迪")};
-    QStringList full{QStringLiteral("艾伦格(Erangel)"), QStringLiteral("米拉玛(Miramar)"), QStringLiteral("泰戈 (Taego)"), QStringLiteral("荣都 (Rondo)"), QStringLiteral("帝斯顿(Deston)"), QStringLiteral("维寒迪(Vikendi)")};
+    QStringList full{QStringLiteral("艾伦格 (Erangel)"), QStringLiteral("米拉玛 (Miramar)"), QStringLiteral("泰戈 (Taego)"), QStringLiteral("荣都 (Rondo)"), QStringLiteral("帝斯顿 (Deston)"), QStringLiteral("维寒迪 (Vikendi)")};
     for (int i = 0; i < maps.size(); ++i) {
         auto* b = new RoundedButton(maps[i], tab);
         b->configure((i % 2) ? 128 : 126, 30, 12, 16);
@@ -553,7 +714,7 @@ void MainWindow::buildLaunchTab(QWidget* tab) {
 
     auto* lab = new QLabel(QStringLiteral("功能开关"), tab);
     lab->setAlignment(Qt::AlignCenter);
-    lab->setGeometry(3, 102, 256, 22);
+    lab->setGeometry(3, 104, 256, 22);
     lab->setStyleSheet("color:#6B7280;font-family:'Microsoft YaHei';font-size:13px;font-weight:700;");
 
     QStringList names{
@@ -572,10 +733,10 @@ void MainWindow::buildLaunchTab(QWidget* tab) {
     });
     for (int i = 0; i < names.size(); ++i) {
         auto* b = new RoundedButton(names[i], tab);
-        b->configure(126, 27, 12, 13);
+        b->configure(126, 28, 12, 13);
         b->setToggleMode(true);
         b->setActive(assistant_state.value(keys[i].toStdString(), true));
-        b->setGeometry(3 + (i % 2) * 130, 130 + (i / 2) * 34, 126, 27);
+        b->setGeometry(3 + (i % 2) * 130, 132 + (i / 2) * 34, 126, 28);
         assistant_buttons_[keys[i]] = b;
         connect(b, &QPushButton::clicked, this, [this, key = keys[i]] { toggleAssistant(key); });
     }
@@ -583,24 +744,104 @@ void MainWindow::buildLaunchTab(QWidget* tab) {
 void MainWindow::buildCalibrationTab(QWidget* tab) {
     tab->setFixedSize(262, 299);
     QVector<std::pair<QString, std::function<void()>>> actions{
-        {QStringLiteral("调试压枪参数"), [this] { openRecoilDebugger(); }},
-        {QStringLiteral("调试特殊武器"), [this] { openSpecialWeaponDebugger(); }},
         {QStringLiteral("显示所有区域框"), [this] { toggleDebugOverlay(); }},
-        {QStringLiteral("校准区域框窗口"), [this] { openRegionCalibrationWindow(); }},
-        {QStringLiteral("调试区域缩放比例"), [this] { openScaleCalibrator(); }},
-        {QStringLiteral("修改快捷键及游戏按键"), [this] { openHotkeySettingsWindow(); }},
-        {QStringLiteral("自定义显示界面"), [this] { openDisplaySettingsWindow(); }},
+        {QStringLiteral("识别区域设置"), [this] { openRegionCalibrationWindow(); }},
+        {QStringLiteral("识别区域缩放设置"), [this] { openScaleCalibrator(); }},
+        {QStringLiteral("按键设置"), [this] { openHotkeySettingsWindow(); }},
+        {QStringLiteral("压枪参数设置"), [this] { openRecoilDebugger(); }},
+        {QStringLiteral("特殊武器参数设置"), [this] { openSpecialWeaponDebugger(); }},
+        {QStringLiteral("界面设置"), [this] { openDisplaySettingsWindow(); }},
     };
     for (int i = 0; i < actions.size(); ++i) {
         auto* b = new RoundedButton(actions[i].first, tab);
         b->configure(256, 36, 12, 15);
-        b->setGeometry(3, 7 + i * 43, 256, 36);
-        if (i == 2) {
+        b->setGeometry(3, 8 + i * 42, 256, 36);
+        if (i == 0) {
             b->setToggleMode(true);
             btn_debug_ = b;
         }
+        if (i == 1) {
+            btn_region_calibration_ = b;
+        } else if (i == 2) {
+            btn_scale_calibration_ = b;
+        }
         connect(b, &QPushButton::clicked, this, [action = actions[i].second] { action(); });
     }
+    refreshCalibrationWarnings();
+}
+
+bool MainWindow::hasMissingRegionCalibration() const {
+    static const std::vector<std::string> region_keys{
+        "largemap_region", "minimap_region",
+        "weapon1_number_region", "weapon2_number_region",
+        "elevation_region", "weapon1_name_region", "weapon2_name_region",
+        "weapon_region", "weapon1_scope_region", "weapon2_scope_region",
+        "stance_region", "weapon1_muzzle_region", "weapon2_muzzle_region",
+        "scope_top_edge_4x_region", "weapon1_grip_region", "weapon2_grip_region",
+        "scope_top_edge_6x_region", "weapon1_stock_region", "weapon2_stock_region",
+        "scope_top_edge_8x_region", "mortar_mount_region", "compass_region",
+    };
+    for (const auto& key : region_keys) {
+        if (!regions_.getRealRegion(key)) {
+            return true;
+        }
+    }
+    return regions_.getRealScale("largemap_1km_px", 0.0) <= 0.0;
+}
+
+bool MainWindow::hasMissingScaleCalibration() const {
+    static const std::vector<std::string> scale_keys{
+        "weapon_region", "weapon1_name_region", "weapon2_name_region", "stance_region",
+    };
+    return config_.read([&](const Json& data) {
+        const auto settings = data.value("region_scaling_settings", Json::object());
+        for (const auto& key : scale_keys) {
+            if (!settings.contains(key) || !settings[key].is_object()) {
+                return true;
+            }
+            const auto& item = settings[key];
+            if (item.value("width", 0) <= 0 || item.value("height", 0) <= 0) {
+                return true;
+            }
+        }
+        return false;
+    });
+}
+
+void MainWindow::refreshCalibrationWarnings() {
+    if (btn_region_calibration_) {
+        btn_region_calibration_->setWarning(hasMissingRegionCalibration());
+    }
+    if (btn_scale_calibration_) {
+        btn_scale_calibration_->setWarning(hasMissingScaleCalibration());
+    }
+    refreshHelpText();
+}
+
+void MainWindow::refreshHelpText() {
+    if (!help_summary_label_) {
+        return;
+    }
+    QStringList steps{
+        QStringLiteral("选择与游戏一致的色盲模式"),
+    };
+    if (hasMissingRegionCalibration()) {
+        steps.push_back(QStringLiteral("点击系统设置-识别区域设置，按照图片指引校准区域框。"));
+    }
+    if (hasMissingScaleCalibration()) {
+        steps.push_back(QStringLiteral("点击识别区域缩放设置，将四个区域分别校准模板缩放比例。"));
+    }
+    steps.push_back(QStringLiteral("点击按键设置，将游戏内同步按键修改为和游戏中一致（开火按键游戏中必须修改，修改为键盘不常用按键，实际使用时按鼠标左键自动触发），并自定义程序快捷键。"));
+    steps.push_back(QStringLiteral("修改游戏中灵敏度为默认（均为50，垂直灵敏度调为1）"));
+
+    QString text = QStringLiteral("首次使用：\n");
+    for (int i = 0; i < steps.size(); ++i) {
+        text += QStringLiteral("%1. %2").arg(i + 1).arg(steps[i]);
+        if (i + 1 < steps.size()) {
+            text += QLatin1Char('\n');
+        }
+    }
+    help_summary_label_->setText(text);
 }
 
 void MainWindow::openRegionCalibrationWindow() {
@@ -612,17 +853,12 @@ void MainWindow::openRegionCalibrationWindow() {
     window->setAttribute(Qt::WA_DeleteOnClose, true);
     window->setWindowFlag(Qt::Window, true);
     window->setWindowTitle(QStringLiteral("校准区域框"));
-    window->resize(280, 330);
-    window->setMinimumSize(280, 330);
+    window->resize(1080, 555);
+    window->setMinimumSize(980, 520);
     const auto theme = currentUiTheme(config_);
     applyThemedPopupWindow(window, config_);
     region_calibration_window_ = window;
     connect(window, &QObject::destroyed, this, [this] { region_calibration_window_ = nullptr; });
-
-    auto* title = new QLabel(QStringLiteral("选择要校准的区域"), window);
-    title->setAlignment(Qt::AlignCenter);
-    title->setGeometry(10, 9, 260, 24);
-    title->setStyleSheet(QStringLiteral("color:%1;font-family:'Microsoft YaHei';font-size:14px;font-weight:700;").arg(theme.button_text));
 
     auto square_keys = QSet<QString>{
         "minimap_region", "largemap_region",
@@ -630,26 +866,184 @@ void MainWindow::openRegionCalibrationWindow() {
         "weapon1_scope_region", "weapon1_grip_region", "weapon1_muzzle_region", "weapon1_stock_region",
         "weapon2_scope_region", "weapon2_grip_region", "weapon2_muzzle_region", "weapon2_stock_region",
     };
-    auto add = [&](const QString& name, const QString& key, bool scale, int row, int col) {
-        auto* b = new RoundedButton(name, window);
-        b->configure(82, 29, 12, 12);
-        b->setGeometry(10 + col * 87 + (col == 2 ? 1 : 0), 42 + (row - 1) * 32, 82, 29);
-        connect(b, &QPushButton::clicked, this, [this, key, scale, square_keys] {
+    struct CalibrationItem {
+        QString name;
+        QString key;
+        bool scale = false;
+        QString note;
+    };
+    const QVector<CalibrationItem> items{
+        {QStringLiteral("大地图"), "largemap_region", false, QStringLiteral("选择完整大地图区域，尽量贴合地图内边缘。")},
+        {QStringLiteral("小地图"), "minimap_region", false, QStringLiteral("选择小地图内边框部分，注意不要框到灰色轮廓条。")},
+        {QStringLiteral("1km比例"), "largemap_1km_px", true, QStringLiteral("在大地图上框选 1km 标尺长度，用于大地图测距换算。")},
+        {QStringLiteral("武器1编号"), "weapon1_number_region", false, QStringLiteral("选择武器编号白边外侧，注意不要过大或框到白边内侧。")},
+        {QStringLiteral("武器2编号"), "weapon2_number_region", false, QStringLiteral("选择武器编号白边外侧，注意不要过大或框到白边内侧。")},
+        {QStringLiteral("垂直测高"), "elevation_region", false, QStringLiteral("选择屏幕中用于识别标点高度的区域，尽量包含标点附近背景。")},
+        {QStringLiteral("武器1名称"), "weapon1_name_region", false, QStringLiteral("比武器名外缘略大即可，右侧需适当延申。")},
+        {QStringLiteral("武器2名称"), "weapon2_name_region", false, QStringLiteral("比武器名外缘略大即可，右侧需适当延申。")},
+        {QStringLiteral("武器图标"), "weapon_region", false, QStringLiteral("选择当前手持武器图标区域，尽量只包含图标本体。")},
+        {QStringLiteral("武器1倍镜"), "weapon1_scope_region", false, QStringLiteral("选择配件白边外侧，注意不要过大或框到白边内侧。")},
+        {QStringLiteral("武器2倍镜"), "weapon2_scope_region", false, QStringLiteral("选择配件白边外侧，注意不要过大或框到白边内侧。")},
+        {QStringLiteral("姿势区域"), "stance_region", false, QStringLiteral("选择站立/蹲下/趴下姿势图标区域，边缘留一点空隙。")},
+        {QStringLiteral("武器1枪口"), "weapon1_muzzle_region", false, QStringLiteral("选择配件白边外侧，注意不要过大或框到白边内侧。")},
+        {QStringLiteral("武器2枪口"), "weapon2_muzzle_region", false, QStringLiteral("选择配件白边外侧，注意不要过大或框到白边内侧。")},
+        {QStringLiteral("四倍镜内边"), "scope_top_edge_4x_region", false, QStringLiteral("框选四倍镜内框上边缘附近，用于呼吸晃动稳定。")},
+        {QStringLiteral("武器1握把"), "weapon1_grip_region", false, QStringLiteral("选择配件白边外侧，注意不要过大或框到白边内侧。")},
+        {QStringLiteral("武器2握把"), "weapon2_grip_region", false, QStringLiteral("选择配件白边外侧，注意不要过大或框到白边内侧。")},
+        {QStringLiteral("六倍镜内边"), "scope_top_edge_6x_region", false, QStringLiteral("框选六倍镜内框上边缘附近，用于呼吸晃动稳定。")},
+        {QStringLiteral("武器1枪托"), "weapon1_stock_region", false, QStringLiteral("选择配件白边外侧，注意不要过大或框到白边内侧。")},
+        {QStringLiteral("武器2枪托"), "weapon2_stock_region", false, QStringLiteral("选择配件白边外侧，注意不要过大或框到白边内侧。")},
+        {QStringLiteral("八倍镜内边"), "scope_top_edge_8x_region", false, QStringLiteral("框选八倍镜内框上边缘附近，用于呼吸晃动稳定。")},
+        {QStringLiteral("迫击炮上炮"), "mortar_mount_region", false, QStringLiteral("选择上炮后出现 F 提示的正方形区域。")},
+        {QStringLiteral("顶部方向"), "compass_region", false, QStringLiteral("选择屏幕顶部方向条区域，用于迫击炮方向自动瞄准。")},
+    };
+
+    auto* root = new QHBoxLayout(window);
+    root->setContentsMargins(24, 42, 24, 22);
+    root->setSpacing(18);
+
+    auto* left_panel = new QWidget(window);
+    left_panel->setFixedWidth(292);
+    auto* left_layout = new QVBoxLayout(left_panel);
+    left_layout->setContentsMargins(0, 0, 0, 0);
+    left_layout->setSpacing(8);
+    auto* title = new QLabel(QStringLiteral("选择要校准的区域"), left_panel);
+    title->setAlignment(Qt::AlignCenter);
+    title->setStyleSheet(QStringLiteral("color:%1;font-family:'Microsoft YaHei';font-size:15px;font-weight:800;").arg(theme.button_text));
+    left_layout->addWidget(title);
+    auto* button_grid = new QGridLayout();
+    button_grid->setContentsMargins(0, 0, 0, 0);
+    button_grid->setHorizontalSpacing(8);
+    button_grid->setVerticalSpacing(7);
+    left_layout->addLayout(button_grid);
+    root->addWidget(left_panel);
+
+    auto* right_panel = new QWidget(window);
+    auto* right_layout = new QVBoxLayout(right_panel);
+    right_layout->setContentsMargins(0, 0, 0, 0);
+    right_layout->setSpacing(10);
+    auto* hint = new QLabel(QStringLiteral("将鼠标移动到校准按钮上预览校准效果"), right_panel);
+    hint->setAlignment(Qt::AlignCenter);
+    hint->setStyleSheet(QStringLiteral("color:%1;font-family:'Microsoft YaHei';font-size:14px;font-weight:800;").arg(theme.button_text));
+    right_layout->addWidget(hint);
+
+    auto* preview = new RoundedPreviewWidget(right_panel);
+    preview->setColors(theme.panel, theme.border, theme.label);
+    preview->setFixedSize(720, 405);
+    right_layout->addWidget(preview, 0, Qt::AlignHCenter);
+
+    left_layout->addSpacing(24);
+    left_layout->addStretch(1);
+
+    auto* note = new QLabel(QStringLiteral("默认预览：移动到左侧按钮查看该区域校准建议。"), right_panel);
+    note->setWordWrap(true);
+    note->setMinimumHeight(46);
+    note->setStyleSheet(QStringLiteral("color:%1;font-family:'Microsoft YaHei';font-size:13px;font-weight:700;").arg(theme.label));
+    right_layout->addWidget(note);
+    root->addWidget(right_panel, 1);
+
+    auto guideImagePath = [this](const QString& key) -> QString {
+        std::vector<std::filesystem::path> roots;
+        const auto config_root = config_.paths().root();
+        roots.push_back(config_root);
+        roots.push_back(std::filesystem::current_path());
+        roots.push_back(std::filesystem::absolute("."));
+        for (auto probe = config_root; !probe.empty(); probe = probe.parent_path()) {
+            roots.push_back(probe);
+            if (probe == probe.parent_path()) break;
+        }
+        std::vector<std::string> guide_keys{key.toStdString()};
+        if (key == QStringLiteral("largemap_1km_px")) {
+            guide_keys.push_back("map_1km_pixels");
+        }
+        for (const auto& root_path : roots) {
+            for (const auto& guide_key : guide_keys) {
+                const std::vector<std::filesystem::path> dirs{
+                    root_path / "assets" / "calibrate_guide" / guide_key,
+                    root_path / "assets" / "calibration_guide" / guide_key,
+                };
+                for (const auto& dir : dirs) {
+                    if (!std::filesystem::exists(dir) || !std::filesystem::is_directory(dir)) continue;
+                    for (const auto& entry : std::filesystem::directory_iterator(dir)) {
+                        if (!entry.is_regular_file()) continue;
+                        auto ext = entry.path().extension().string();
+                        std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char ch) {
+                            return static_cast<char>(std::tolower(ch));
+                        });
+                        if (ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".bmp") {
+                            return QString::fromStdWString(entry.path().wstring());
+                        }
+                    }
+                }
+            }
+        }
+        return {};
+    };
+    auto showPreview = [this, preview, note, guideImagePath](const CalibrationItem& item) {
+        note->setText(item.note);
+        const QString image_path = guideImagePath(item.key);
+        if (image_path.isEmpty()) {
+            preview->setPixmap({});
+            preview->setText(QStringLiteral("暂无预览图\n%1").arg(item.name));
+            return;
+        }
+        cv::Mat image_mat = loadPreviewImage(image_path);
+        if (!image_mat.empty()) {
+            if (image_mat.channels() == 4) {
+                cv::cvtColor(image_mat, image_mat, cv::COLOR_BGRA2RGBA);
+            } else if (image_mat.channels() == 3) {
+                cv::cvtColor(image_mat, image_mat, cv::COLOR_BGR2RGB);
+            } else if (image_mat.channels() == 1) {
+                cv::cvtColor(image_mat, image_mat, cv::COLOR_GRAY2RGB);
+            }
+        }
+        QImage image;
+        if (!image_mat.empty()) {
+            const QImage::Format format = image_mat.channels() == 4 ? QImage::Format_RGBA8888 : QImage::Format_RGB888;
+            image = QImage(image_mat.data, image_mat.cols, image_mat.rows,
+                           static_cast<int>(image_mat.step), format).copy();
+        }
+        if (image.isNull()) {
+            preview->setPixmap({});
+            preview->setText(QStringLiteral("预览图读取失败\n%1\n%2").arg(item.name, image_path));
+            return;
+        }
+        const QPixmap pixmap = QPixmap::fromImage(image);
+        preview->setText({});
+        const QPixmap scaled = pixmap.scaled(preview->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation);
+        preview->setPixmap(scaled);
+    };
+    const CalibrationItem default_item{QStringLiteral("默认预览"), "default", false, QStringLiteral("默认预览：移动到左侧按钮查看该区域校准建议。")};
+    showPreview(default_item);
+
+    for (int i = 0; i < items.size(); ++i) {
+        const auto item = items[i];
+        auto* b = new RoundedButton(item.name, left_panel);
+        b->configure(138, 28, 12, 12);
+        b->setFixedSize(138, 28);
+        b->setWarning(item.scale ? regions_.getRealScale(item.key.toStdString(), 0.0) <= 0.0
+                                 : !regions_.getRealRegion(item.key.toStdString()).has_value());
+        button_grid->addWidget(b, i / 2, i % 2);
+        b->installEventFilter(new HoverCallbackFilter([showPreview, item] { showPreview(item); }, b));
+        connect(b, &QPushButton::clicked, this, [this, item, square_keys] {
             if (region_calibration_overlay_) {
                 region_calibration_overlay_->raise();
                 region_calibration_overlay_->activateWindow();
                 return;
             }
-            auto* ov = new RegionCalibrationOverlay(regions_, key, scale ? RegionCalibrationOverlay::Mode::Scale : RegionCalibrationOverlay::Mode::Region, square_keys.contains(key));
+            auto* ov = new RegionCalibrationOverlay(regions_, item.key,
+                item.scale ? RegionCalibrationOverlay::Mode::Scale : RegionCalibrationOverlay::Mode::Region,
+                square_keys.contains(item.key));
             region_calibration_overlay_ = ov;
             if (debug_overlay_.created()) {
                 debug_overlay_.clear();
                 debug_overlay_.show(false);
             }
             connect(ov, &RegionCalibrationOverlay::calibrationClosed, this, [this](bool changed) {
+                refreshCalibrationWarnings();
                 if (debug_overlay_enabled_) {
                     if (!debug_overlay_.created()) {
-                        debug_overlay_.create(L"PUBGAssistant DebugRegions", regions_.screenWidth(), regions_.screenHeight(), true);
+                        regions_.createOverlay(debug_overlay_, L"PUBGAssistant DebugRegions", true, false);
                     }
                     debug_overlay_.show(true);
                     if (changed) drawDebugOverlay();
@@ -658,21 +1052,9 @@ void MainWindow::openRegionCalibrationWindow() {
             connect(ov, &QObject::destroyed, this, [this] { region_calibration_overlay_ = nullptr; });
             ov->show();
         });
-    };
-    QVector<QVector<std::tuple<QString, bool, QString>>> rows{
-        {{QStringLiteral("大地图"), false, "largemap_region"}, {QStringLiteral("小地图"), false, "minimap_region"}, {QStringLiteral("1km比例"), true, "largemap_1km_px"}},
-        {{QStringLiteral("武器1编号"), false, "weapon1_number_region"}, {QStringLiteral("武器2编号"), false, "weapon2_number_region"}, {QStringLiteral("垂直测高"), false, "elevation_region"}},
-        {{QStringLiteral("武器1名称"), false, "weapon1_name_region"}, {QStringLiteral("武器2名称"), false, "weapon2_name_region"}, {QStringLiteral("武器图标"), false, "weapon_region"}},
-        {{QStringLiteral("武器1倍镜"), false, "weapon1_scope_region"}, {QStringLiteral("武器2倍镜"), false, "weapon2_scope_region"}, {QStringLiteral("姿势区域"), false, "stance_region"}},
-        {{QStringLiteral("武器1枪口"), false, "weapon1_muzzle_region"}, {QStringLiteral("武器2枪口"), false, "weapon2_muzzle_region"}, {QStringLiteral("四倍镜内边"), false, "scope_top_edge_4x_region"}},
-        {{QStringLiteral("武器1握把"), false, "weapon1_grip_region"}, {QStringLiteral("武器2握把"), false, "weapon2_grip_region"}, {QStringLiteral("六倍镜内边"), false, "scope_top_edge_6x_region"}},
-        {{QStringLiteral("武器1枪托"), false, "weapon1_stock_region"}, {QStringLiteral("武器2枪托"), false, "weapon2_stock_region"}, {QStringLiteral("八倍镜内边"), false, "scope_top_edge_8x_region"}},
-        {{QStringLiteral("迫击炮上炮"), false, "mortar_mount_region"}, {QStringLiteral("顶部方向"), false, "compass_region"}},
-    };
-    for (int r = 0; r < rows.size(); ++r) {
-        for (int c = 0; c < rows[r].size(); ++c) {
-            add(std::get<0>(rows[r][c]), std::get<2>(rows[r][c]), std::get<1>(rows[r][c]), r + 1, c);
-        }
+        connect(b, &QPushButton::pressed, this, [showPreview, item] { showPreview(item); });
+        b->setAttribute(Qt::WA_Hover, true);
+        b->setToolTip(item.note);
     }
     showWindowInsideScreen(window);
 }
@@ -836,7 +1218,7 @@ void MainWindow::toggleAssistant(const QString& key) {
 }
 
 void MainWindow::selectMap(int index) {
-    QStringList full{QStringLiteral("艾伦格(Erangel)"), QStringLiteral("米拉玛(Miramar)"), QStringLiteral("泰戈 (Taego)"), QStringLiteral("荣都 (Rondo)"), QStringLiteral("帝斯顿(Deston)"), QStringLiteral("维寒迪(Vikendi)")};
+    QStringList full{QStringLiteral("艾伦格 (Erangel)"), QStringLiteral("米拉玛 (Miramar)"), QStringLiteral("泰戈 (Taego)"), QStringLiteral("荣都 (Rondo)"), QStringLiteral("帝斯顿 (Deston)"), QStringLiteral("维寒迪 (Vikendi)")};
     for (int i = 0; i < map_buttons_.size(); ++i) map_buttons_[i]->setActive(i == index);
     if (index >= 0 && index < full.size()) {
         map_points_.setMap(full[index].toStdString());
@@ -868,9 +1250,6 @@ void MainWindow::selectPntColorMode(const QString& mode) {
     config_.write([&](Json& data) {
         data["pnt_color_mode"] = mode.toStdString();
         data["ui_state"]["pnt_color_mode"] = mode.toStdString();
-        if (data.contains("pnt_color_modes") && data["pnt_color_modes"].contains(mode.toStdString())) {
-            data["pnt_colors"] = data["pnt_color_modes"][mode.toStdString()];
-        }
     });
     config_.save();
     if (callbacks_.sync_marker_colors) callbacks_.sync_marker_colors();
@@ -878,7 +1257,7 @@ void MainWindow::selectPntColorMode(const QString& mode) {
 void MainWindow::toggleDebugOverlay() {
     debug_overlay_enabled_ = btn_debug_ ? btn_debug_->active() : !debug_overlay_enabled_;
     if (!debug_overlay_.created()) {
-        debug_overlay_.create(L"PUBGAssistant DebugRegions", regions_.screenWidth(), regions_.screenHeight(), true);
+        regions_.createOverlay(debug_overlay_, L"PUBGAssistant DebugRegions", true, false);
     }
     debug_overlay_.show(debug_overlay_enabled_);
     if (debug_overlay_enabled_) drawDebugOverlay();
@@ -924,7 +1303,7 @@ void MainWindow::drawDebugOverlay() {
                             static_cast<double>(rect->left + rect->width), static_cast<double>(rect->top + rect->height),
                             0, "", color, 1});
             cmds.push_back({OverlayCommand::Type::Text, static_cast<double>(rect->left + 5), static_cast<double>(std::max(5, rect->top - 16)),
-                            0, 0, 0, region_name, color, 1, 13});
+                            0, 0, 0, regionDisplayName(region_name), color, 1, 13});
     }
     const double large_scale = regions_.getRealScale("largemap_1km_px", 0.0);
     cmds.push_back({OverlayCommand::Type::Text, regions_.screenWidth() / 2.0 - 110.0, 50.0, 0, 0, 0,
@@ -940,6 +1319,7 @@ void MainWindow::openScaleCalibrator() {
         scale_calibration_window_->setWindowFlag(Qt::Window, true);
         connect(scale_calibration_window_, &QObject::destroyed, this, [this] {
             scale_calibration_window_ = nullptr;
+            refreshCalibrationWarnings();
         });
     }
     showWindowInsideScreen(scale_calibration_window_);
@@ -968,32 +1348,24 @@ void MainWindow::openSpecialWeaponDebugger() {
     window->setWindowFlag(Qt::Window, true);
     special_weapon_debugger_window_ = window;
     connect(window, &QObject::destroyed, this, [this] { special_weapon_debugger_window_ = nullptr; });
+    connect(window, &SpecialWeaponDebuggerWindow::saved, this, [this] {
+        if (callbacks_.refresh_status_hud) callbacks_.refresh_status_hud();
+    });
     showWindowInsideScreen(window);
 }
 
 void MainWindow::buildHelpTab(QWidget* tab) {
     tab->setFixedSize(262, 299);
-    const QString text = QStringLiteral(
-        "首次使用\n"
-        "1. 选择与游戏一致的色盲模式\n"
-        "2. 校准区域框与缩放比例\n"
-        "3. 快捷键需和游戏按键一致\n"
-        "4. 开火不要用鼠标左键，改为同步按键\n"
-        "5. 游戏灵敏度请保持默认\n"
-        "\n"
-        "日常提醒\n"
-        "打开装备栏、开火、小地图、大地图按键\n"
-        "如果在游戏内改过，也要在这里同步修改。"
-    );
-    auto* summary = new QLabel(text, tab);
-    summary->setWordWrap(true);
-    summary->setAlignment(Qt::AlignLeft | Qt::AlignTop);
-    summary->setGeometry(7, 8, 248, 232);
-    summary->setStyleSheet("font-family:'Microsoft YaHei';font-size:11px;font-weight:700;");
+    help_summary_label_ = new QLabel(tab);
+    help_summary_label_->setWordWrap(true);
+    help_summary_label_->setAlignment(Qt::AlignLeft | Qt::AlignTop);
+    help_summary_label_->setGeometry(7, 8, 248, 238);
+    help_summary_label_->setStyleSheet("font-family:'Microsoft YaHei';font-size:10px;font-weight:700;");
+    refreshHelpText();
 
     auto* open = new RoundedButton(QStringLiteral("查看完整使用说明文档"), tab);
-    open->configure(256, 42, 12, 15);
-    open->setGeometry(3, 253, 256, 42);
+    open->configure(256, 36, 12, 14);
+    open->setGeometry(3, 260, 256, 36);
     connect(open, &QPushButton::clicked, this, &MainWindow::openFullHelpWindow);
 }
 
@@ -1019,7 +1391,7 @@ void MainWindow::openHotkeySettingsWindow() {
         auto* window = new QWidget(this);
         window->setAttribute(Qt::WA_DeleteOnClose, true);
         window->setWindowFlag(Qt::Window, true);
-        window->setWindowTitle(QStringLiteral("修改快捷键及游戏按键"));
+        window->setWindowTitle(QStringLiteral("按键设置"));
         window->resize(580, 720);
         window->setMinimumSize(560, 680);
         const auto theme = currentUiTheme(config_);
@@ -1226,12 +1598,50 @@ void MainWindow::saveHotkeys() {
     if (callbacks_.reload_hotkeys) callbacks_.reload_hotkeys();
 }
 
+void MainWindow::closeAuxiliaryWindows() {
+#ifdef _WIN32
+    stopCaptureHook();
+#endif
+    auto destroyWidget = []<class Widget>(Widget*& window) {
+        if (!window) {
+            return;
+        }
+        window->setAttribute(Qt::WA_DeleteOnClose, false);
+        delete window;
+        window = nullptr;
+    };
+    auto destroyPointer = [](QPointer<QWidget>& window) {
+        if (!window) {
+            return;
+        }
+        QWidget* raw = window.data();
+        raw->setAttribute(Qt::WA_DeleteOnClose, false);
+        delete raw;
+        window = nullptr;
+    };
+
+    if (region_calibration_overlay_) {
+        QWidget* raw = region_calibration_overlay_.data();
+        raw->setAttribute(Qt::WA_DeleteOnClose, false);
+        delete raw;
+        region_calibration_overlay_ = nullptr;
+    }
+    destroyPointer(region_calibration_window_);
+    destroyWidget(scale_calibration_window_);
+    destroyWidget(display_settings_window_);
+    destroyPointer(recoil_debugger_window_);
+    destroyPointer(special_weapon_debugger_window_);
+    destroyPointer(hotkey_settings_window_);
+    destroyPointer(help_window_);
+}
+
 void MainWindow::closeEvent(QCloseEvent* event) {
 #ifdef _WIN32
     stopCaptureHook();
 #endif
     if (!closing_) {
         closing_ = true;
+        closeAuxiliaryWindows();
         QApplication::quit();
     }
     QMainWindow::closeEvent(event);

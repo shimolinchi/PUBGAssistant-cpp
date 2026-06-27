@@ -152,7 +152,7 @@ QString CurveEditor::displayLabel(const QString& label) const {
     if (label == "half") return QStringLiteral("半截握把");
     if (label == "light") return QStringLiteral("轻型握把");
     if (label == "thumb") return QStringLiteral("拇指握把");
-    if (label == "tilted") return QStringLiteral("直角握把");
+    if (label == "tilted") return QStringLiteral("斜向握把");
     if (label == "laser") return QStringLiteral("激光瞄准器");
     if (label == "ar_dmr_compensator") return QStringLiteral("步枪/连狙补偿器");
     if (label == "ar_dmr_silencer") return QStringLiteral("步枪/连狙消音器");

@@ -16,7 +16,7 @@ MinimapRadar::MinimapRadar(Config& config, RegionManager& regions, int fps)
     for (const auto& c : colors_) {
         distances_[c.name] = 0.0;
     }
-    overlay_.create(L"PUBGAssistant Minimap", regions_.screenWidth(), regions_.screenHeight(), true, true);
+    regions_.createOverlay(overlay_, L"PUBGAssistant Minimap", true, true);
 }
 
 MinimapRadar::~MinimapRadar() {
@@ -61,7 +61,7 @@ DistanceMap MinimapRadar::measuredDistance() const {
     return distances_;
 }
 
-std::vector<TargetPoint> MinimapRadar::matchColorCandidates(const cv::Mat& mask, const MarkerColor& color) {
+std::vector<TargetPoint> MinimapRadar::matchColorCandidates(const cv::Mat& mask, const MarkerColor& color, double threshold) {
     std::vector<TargetPoint> out;
     if (point_templates_.empty() || cv::countNonZero(mask) == 0) {
         return out;
@@ -70,10 +70,16 @@ std::vector<TargetPoint> MinimapRadar::matchColorCandidates(const cv::Mat& mask,
     cv::dilate(mask, search, kernel_, {-1, -1}, 1);
     std::vector<std::vector<cv::Point>> contours;
     cv::findContours(search, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+    const int max_candidate_w = std::max(48, max_tpl_w_ * 4);
+    const int max_candidate_h = std::max(56, max_tpl_h_ * 4);
+    const int max_candidate_area = max_candidate_w * max_candidate_h;
 
     for (const auto& contour : contours) {
         cv::Rect bound = cv::boundingRect(contour);
         if (bound.area() < 4) {
+            continue;
+        }
+        if (bound.width > max_candidate_w || bound.height > max_candidate_h || bound.area() > max_candidate_area) {
             continue;
         }
         const int x1 = std::max(0, bound.x - max_tpl_w_);
@@ -91,7 +97,7 @@ std::vector<TargetPoint> MinimapRadar::matchColorCandidates(const cv::Mat& mask,
             double max_val = 0.0;
             cv::Point max_loc;
             cv::minMaxLoc(res, nullptr, &max_val, nullptr, &max_loc);
-            if (max_val >= 0.70) {
+            if (std::isfinite(max_val) && max_val >= threshold) {
                 TargetPoint pt;
                 pt.color_name = color.name;
                 pt.hex = color.hex;
@@ -154,10 +160,13 @@ void MinimapRadar::run() {
         std::vector<TargetPoint> found;
         DistanceMap distances;
         const double now = nowSeconds();
+        const double threshold = config_.read([](const Json& data) {
+            return data.value("pnt_detection", Json::object()).value("minimap_threshold", 0.62);
+        });
         for (const auto& c : colors) {
             cv::Mat mask;
             cv::inRange(hsv, c.lower_hsv, c.upper_hsv, mask);
-            auto candidates = matchColorCandidates(mask, c);
+            auto candidates = matchColorCandidates(mask, c, threshold);
             std::sort(candidates.begin(), candidates.end(), [](const auto& a, const auto& b) {
                 return a.confidence > b.confidence;
             });

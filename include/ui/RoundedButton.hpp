@@ -22,6 +22,7 @@ public:
 
     // 主动设置激活态，不触发 clicked。
     void setActive(bool active);
+    void setWarning(bool warning);
 
     // 返回当前视觉激活态。主窗口用它决定手动助手是否开启。
     [[nodiscard]] bool active() const noexcept { return active_; }
@@ -40,6 +41,7 @@ private:
     bool active_ = false;
     bool hovered_ = false;
     bool pressed_ = false;
+    bool warning_ = false;
     int radius_ = 18;
     int pixel_font_size_ = 13;
 };

@@ -35,7 +35,7 @@ int assistTextAlpha(const Config& config) {
 
 ThrowablesAssistant::ThrowablesAssistant(Config& config, RegionManager& regions, MinimapRadar& minimap)
     : config_(config), regions_(regions), minimap_(minimap), ballistics_(config), hex_(config.markerHex()) {
-    overlay_.create(L"PUBGAssistant Throwables", regions_.screenWidth(), regions_.screenHeight(), true);
+    regions_.createOverlay(overlay_, L"PUBGAssistant Throwables", true);
     worker_ = std::thread(&ThrowablesAssistant::workerLoop, this);
 }
 

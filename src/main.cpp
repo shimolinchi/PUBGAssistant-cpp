@@ -26,9 +26,15 @@ int main(int argc, char** argv) {
     enablePerMonitorDpiAwareness();
     cv::utils::logging::setLogLevel(cv::utils::logging::LOG_LEVEL_WARNING);
     try {
-        QApplication qapp(argc, argv);
-        pubg::App app;
-        return app.run();
+        int code = 0;
+        {
+            QApplication qapp(argc, argv);
+            {
+                pubg::App app;
+                code = app.run();
+            }
+        }
+        return code;
     } catch (const std::exception& e) {
         std::cerr << "Fatal error: " << e.what() << "\n";
         return 1;

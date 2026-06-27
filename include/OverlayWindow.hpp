@@ -34,6 +34,8 @@ public:
     bool create(const std::wstring& title, int width, int height, bool click_through = true);
     bool create(const std::wstring& title, int width, int height, bool click_through,
                 bool exclude_from_capture);
+    bool createAt(const std::wstring& title, int left, int top, int width, int height,
+                  bool click_through = true, bool exclude_from_capture = true);
 
     // 显示或隐藏窗口。
     void show(bool visible);
@@ -43,6 +45,9 @@ public:
 
     // 清空 HUD 内容。
     void clear();
+
+    // 主动关闭底层 Win32 窗口。退出时先调用它，避免后台线程残留的重绘消息继续访问旧句柄。
+    void close();
 
     // 处理本线程窗口消息。识别/HUD 线程需要周期调用，否则窗口不刷新。
     void pumpMessages();
@@ -58,12 +63,18 @@ private:
     // 根据 commands_ 执行实际 GDI 绘制。
     void paint();
     void renderLayered();
+    void requestRender();
+    bool isOwnerThread() const;
     HWND hwnd_ = nullptr;
+    DWORD owner_thread_id_ = 0;
+    std::atomic_bool destroying_{false};
 #endif
     std::mutex mutex_;
     std::vector<OverlayCommand> commands_;
     int width_ = 0;
     int height_ = 0;
+    int left_ = 0;
+    int top_ = 0;
 };
 
 } // namespace pubg

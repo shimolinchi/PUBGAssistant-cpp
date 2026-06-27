@@ -2,6 +2,7 @@
 
 #include <mutex>
 #include <shared_mutex>
+#include <utility>
 
 #include "Common.hpp"
 #include "ResourcePaths.hpp"
@@ -18,9 +19,13 @@ public:
     // 读取主配置并合并 map_data/recoil_settings/special_assistants 分文件。
     // 如果分文件不存在，会保留主配置里同名字段，便于兼容旧版单文件配置。
     bool load();
+    bool loadRegionProfile(int width, int height);
 
     // 将当前 data_ 按职责写回多个 JSON 文件。主配置不再保存地图点位、压枪和特殊助手大字段。
     bool save();
+    bool saveRegionProfile() const;
+    [[nodiscard]] bool hasActiveRegionProfile() const noexcept { return active_region_w_ > 0 && active_region_h_ > 0; }
+    [[nodiscard]] std::pair<int, int> activeRegionResolution() const noexcept { return {active_region_w_, active_region_h_}; }
 
     // 原始 JSON 不再向外暴露裸引用。读取用 read()，写入用 write()，避免后台线程和 UI 线程数据竞争。
 
@@ -57,12 +62,15 @@ private:
     bool saveJsonFile(const std::filesystem::path& path, const Json& data) const;
     void mergeSplitConfig();
     [[nodiscard]] Json baseConfigWithoutSplitSections() const;
+    [[nodiscard]] Json regionProfileConfig() const;
     [[nodiscard]] Json specialAssistantsConfig() const;
     // markerColors() 的无锁实现，供已持有 mutex_ 的 markerColors()/markerHex() 复用，避免共享锁递归。
     [[nodiscard]] std::vector<MarkerColor> markerColorsUnlocked() const;
 
     ResourcePaths paths_;
     Json data_;
+    int active_region_w_ = 0;
+    int active_region_h_ = 0;
     // 保护 data_：后台识别线程读、UI 线程写。read()/save() 取共享锁，write()/load() 取独占锁。
     mutable std::shared_mutex mutex_;
 };

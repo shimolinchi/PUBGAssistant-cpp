@@ -32,7 +32,7 @@ public:
     // 更新当前姿势 stand/squat/lie，用于 stance_multipliers。
     void updateStance(const std::string& stance);
 
-    // 重新读取 recoil_settings。后续做调试窗口时可热重载参数。
+    // 请求重新读取 recoil_settings。输入控制开启时由后台线程异步执行，避免 UI 保存时卡死。
     void reloadConfig();
 
     // 玩家物理按下 Q/E 时更新 SG 闪身喷方向。0=无，1=左，2=右。
@@ -47,6 +47,7 @@ public:
 private:
     // 从 Config 中读取 fire_key、曲线步长、武器曲线、姿势倍率和配件倍率。
     void loadConfig();
+    void applyCurrentWeaponConfigLocked(const std::string& weapon);
 
     // 把 JSON 中的数字或数组统一转成 double 曲线。
     // Python 版既支持单值也支持列表，这里保持兼容。
@@ -58,6 +59,7 @@ private:
 
     // 根据 key 读取某类倍率曲线并采样；key 为空或不存在时返回 1.0。
     double multiplier(const std::unordered_map<std::string, std::vector<double>>& map, const std::string& key, double elapsed) const;
+    static std::string canonicalAttachmentKey(const std::string& key);
 
     // 计算当前时刻总压枪强度：
     // 武器曲线 * 倍镜倍率 * 握把倍率 * 枪口倍率 * 枪托倍率 * 姿势倍率。
@@ -144,6 +146,7 @@ private:
     double sr_last_confirmed_edge_time_ = 0.0;
     double sr_last_track_time_ = 0.0;
     std::string sr_tracker_region_name_;
+    std::atomic_bool reload_requested_{false};
 };
 
 } // namespace pubg

@@ -146,8 +146,8 @@ void SpecialWeaponDebuggerWindow::renderCurrentWeapon() {
     else if (w == QStringLiteral("十字弩")) bindCurve("crossbow_config", "calib_dists", "calib_drops_ratio", QColor("#EA580C"), QStringLiteral("下坠比例"));
     else if (w == QStringLiteral("投掷物")) bindThrowables(throw_mode_combo_->currentText() == QStringLiteral("跳投"));
     else if (w == QStringLiteral("迫击炮")) bindParams("mortar_config", {
-        {"a_param", QStringLiteral("上坠修正 a"), 4.5},
-        {"b_param", QStringLiteral("下坠修正 b"), 4.5},
+        {"a_param", QStringLiteral("上坠修正 a"), 0.2},
+        {"b_param", QStringLiteral("下坠修正 b"), 0.2},
         {"direction_auto_aim_kp", QStringLiteral("方向 PID - Kp"), 0.045},
         {"direction_auto_aim_ki", QStringLiteral("方向 PID - Ki"), 0.0},
         {"direction_auto_aim_kd", QStringLiteral("方向 PID - Kd"), 0.012},
@@ -261,8 +261,9 @@ void SpecialWeaponDebuggerWindow::addPoint() {
 }
 
 void SpecialWeaponDebuggerWindow::saveAndApply() {
+    const bool editing_params = !param_edits_.empty();
     config_.write([&](Json& data) {
-        if (!param_edits_.empty()) {
+        if (editing_params) {
             for (const auto& [key, edit] : param_edits_) {
                 data[active_config_][key] = edit->text().toDouble();
             }
@@ -273,8 +274,11 @@ void SpecialWeaponDebuggerWindow::saveAndApply() {
         }
     });
     config_.save();
-    curve_editor_->clearUndoHistory();
-    renderCurrentWeapon();
+    if (!editing_params) {
+        curve_editor_->clearUndoHistory();
+        renderCurrentWeapon();
+    }
+    emit saved();
     status_label_->setText(QStringLiteral("参数已保存、重载并应用。"));
 }
 

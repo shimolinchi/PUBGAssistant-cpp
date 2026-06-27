@@ -16,11 +16,11 @@ RegionCalibrationOverlay::RegionCalibrationOverlay(RegionManager& regions, QStri
     setAttribute(Qt::WA_TranslucentBackground, true);
     setWindowOpacity(0.99);
     setCursor(Qt::CrossCursor);
-    if (QScreen* screen = QGuiApplication::screenAt(QCursor::pos())) {
-        setGeometry(screen->geometry());
+    const QRect target(regions_.qtScreenLeft(), regions_.qtScreenTop(), regions_.qtScreenWidth(), regions_.qtScreenHeight());
+    setGeometry(target);
+    if (QScreen* screen = QGuiApplication::screenAt(target.center())) {
         setScreen(screen);
     } else if (QScreen* screen = QGuiApplication::primaryScreen()) {
-        setGeometry(screen->geometry());
         setScreen(screen);
     }
 }
@@ -110,8 +110,8 @@ void RegionCalibrationOverlay::keyPressEvent(QKeyEvent* event) {
 }
 
 QPoint RegionCalibrationOverlay::toPhysical(const QPoint& point) const {
-    const double scale = devicePixelRatioF();
     const QPoint top_left = geometry().topLeft();
+    const double scale = regions_.devicePixelRatio();
     return {
         static_cast<int>(std::round((top_left.x() + point.x()) * scale)),
         static_cast<int>(std::round((top_left.y() + point.y()) * scale))

@@ -133,7 +133,12 @@ private:
     bool captureHotkey(const QString& key, const QStringList& modifiers);
     void saveHotkeys();
     void resetDefaultHotkeys();
+    void closeAuxiliaryWindows();
     QString formatHotkey(const std::string& value) const;
+    bool hasMissingRegionCalibration() const;
+    bool hasMissingScaleCalibration() const;
+    void refreshCalibrationWarnings();
+    void refreshHelpText();
 
     Config& config_;
     RegionManager& regions_;
@@ -155,6 +160,7 @@ private:
     QStackedWidget* pages_ = nullptr;
     QVector<RoundedButton*> tab_buttons_;
     QLabel* status_label_ = nullptr;
+    QLabel* help_summary_label_ = nullptr;
     QPoint drag_offset_;
 
     bool weapon_detection_enabled_ = true;
@@ -171,6 +177,8 @@ private:
     RoundedButton* btn_display_ = nullptr;
     RoundedButton* btn_recoil_ = nullptr;
     RoundedButton* btn_debug_ = nullptr;
+    RoundedButton* btn_region_calibration_ = nullptr;
+    RoundedButton* btn_scale_calibration_ = nullptr;
     QVector<RoundedButton*> map_buttons_;
     QVector<RoundedButton*> size_buttons_;
     QHash<QString, RoundedButton*> pnt_mode_buttons_;

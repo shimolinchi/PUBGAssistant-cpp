@@ -1,0 +1,167 @@
+﻿{
+    "resolution":  {
+                       "width":  1920,
+                       "height":  1080
+                   },
+    "real_regions":  {
+                         "compass_region":  {
+                                                "height":  77,
+                                                "left":  553,
+                                                "top":  0,
+                                                "width":  796
+                                            },
+                         "crosshair_region":  {
+                                                  "height":  720,
+                                                  "left":  600,
+                                                  "top":  180,
+                                                  "width":  720
+                                              },
+                         "elevation_region":  {
+                                                  "height":  910,
+                                                  "left":  923,
+                                                  "top":  70,
+                                                  "width":  65
+                                              },
+                         "largemap_region":  {
+                                                 "height":  1079,
+                                                 "left":  421,
+                                                 "top":  0,
+                                                 "width":  1079
+                                             },
+                         "minimap_region":  {
+                                                "height":  457,
+                                                "left":  1430,
+                                                "top":  593,
+                                                "width":  457
+                                            },
+                         "mortar_mount_region":  {
+                                                     "height":  34,
+                                                     "left":  1291,
+                                                     "top":  806,
+                                                     "width":  34
+                                                 },
+                         "scope_top_edge_4x_region":  {
+                                                          "height":  125,
+                                                          "left":  931,
+                                                          "top":  149,
+                                                          "width":  58
+                                                      },
+                         "scope_top_edge_6x_region":  {
+                                                          "height":  152,
+                                                          "left":  920,
+                                                          "top":  117,
+                                                          "width":  81
+                                                      },
+                         "scope_top_edge_8x_region":  {
+                                                          "height":  159,
+                                                          "left":  916,
+                                                          "top":  35,
+                                                          "width":  86
+                                                      },
+                         "stance_region":  {
+                                               "height":  64,
+                                               "left":  696,
+                                               "top":  968,
+                                               "width":  51
+                                           },
+                         "weapon1_grip_region":  {
+                                                     "height":  52,
+                                                     "left":  1435,
+                                                     "top":  235,
+                                                     "width":  52
+                                                 },
+                         "weapon1_muzzle_region":  {
+                                                       "height":  52,
+                                                       "left":  1333,
+                                                       "top":  235,
+                                                       "width":  52
+                                                   },
+                         "weapon1_name_region":  {
+                                                     "height":  31,
+                                                     "left":  1371,
+                                                     "top":  95,
+                                                     "width":  160
+                                                 },
+                         "weapon1_number_region":  {
+                                                       "height":  32,
+                                                       "left":  1333,
+                                                       "top":  93,
+                                                       "width":  32
+                                                   },
+                         "weapon1_scope_region":  {
+                                                      "height":  51,
+                                                      "left":  1605,
+                                                      "top":  113,
+                                                      "width":  51
+                                                  },
+                         "weapon1_stock_region":  {
+                                                      "height":  52,
+                                                      "left":  1757,
+                                                      "top":  235,
+                                                      "width":  52
+                                                  },
+                         "weapon2_grip_region":  {
+                                                     "height":  52,
+                                                     "left":  1434,
+                                                     "top":  461,
+                                                     "width":  52
+                                                 },
+                         "weapon2_muzzle_region":  {
+                                                       "height":  52,
+                                                       "left":  1332,
+                                                       "top":  461,
+                                                       "width":  52
+                                                   },
+                         "weapon2_name_region":  {
+                                                     "height":  32,
+                                                     "left":  1371,
+                                                     "top":  321,
+                                                     "width":  178
+                                                 },
+                         "weapon2_number_region":  {
+                                                       "height":  32,
+                                                       "left":  1333,
+                                                       "top":  319,
+                                                       "width":  32
+                                                   },
+                         "weapon2_scope_region":  {
+                                                      "height":  52,
+                                                      "left":  1605,
+                                                      "top":  339,
+                                                      "width":  52
+                                                  },
+                         "weapon2_stock_region":  {
+                                                      "height":  53,
+                                                      "left":  1756,
+                                                      "top":  461,
+                                                      "width":  53
+                                                  },
+                         "weapon_region":  {
+                                               "height":  67,
+                                               "left":  858,
+                                               "top":  920,
+                                               "width":  203
+                                           }
+                     },
+    "real_scales":  {
+                        "largemap_1km_px":  150
+                    },
+    "region_scaling_settings":  {
+                                    "stance_region":  {
+                                                          "height":  67,
+                                                          "width":  53
+                                                      },
+                                    "weapon1_name_region":  {
+                                                                "height":  43,
+                                                                "width":  240
+                                                            },
+                                    "weapon2_name_region":  {
+                                                                "height":  37,
+                                                                "width":  195
+                                                            },
+                                    "weapon_region":  {
+                                                          "height":  67,
+                                                          "width":  200
+                                                      }
+                                }
+}

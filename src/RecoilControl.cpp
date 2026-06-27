@@ -122,15 +122,37 @@ void RecoilControl::loadConfig() {
         }
         return out;
     };
+    auto loadGripCurves = [](const Json& j) {
+        std::unordered_map<std::string, std::vector<double>> out;
+        for (auto it = j.begin(); it != j.end(); ++it) {
+            const std::string key = RecoilControl::canonicalAttachmentKey(it.key());
+            if (!out.contains(key) || key == it.key()) {
+                out[key] = RecoilControl::normalizeCurve(it.value(), 1.0);
+            }
+        }
+        return out;
+    };
     scope_curves_ = loadCurves(rc.value("scope_multipliers", Json::object()));
-    grip_curves_ = loadCurves(rc.value("grip_multipliers", Json::object()));
+    grip_curves_ = loadGripCurves(rc.value("grip_multipliers", Json::object()));
     muzzle_curves_ = loadCurves(rc.value("muzzle_multipliers", Json::object()));
     stock_curves_ = loadCurves(rc.value("stock_multipliers", Json::object()));
 }
 
 void RecoilControl::reloadConfig() {
+#if PUBG_ENABLE_INPUT_CONTROL
+    reload_requested_ = true;
+#else
     std::lock_guard lock(mutex_);
     loadConfig();
+#endif
+}
+
+std::string RecoilControl::canonicalAttachmentKey(const std::string& key) {
+    if (key == "tilted" || key == "angled" || key == "angle" ||
+        key == "斜向握把" || key == "斜握" || key == "直角握把") {
+        return "tilted";
+    }
+    return key;
 }
 
 bool RecoilControl::isFiring() const {
@@ -200,6 +222,10 @@ void RecoilControl::updateCurrentWeapon(const std::string& weapon) {
     if (weapon == current_weapon_) {
         return;
     }
+    applyCurrentWeaponConfigLocked(weapon);
+}
+
+void RecoilControl::applyCurrentWeaponConfigLocked(const std::string& weapon) {
     const bool was_sg = weapon_type_ == "sg";
     if (weapon.empty()) {
         current_weapon_.clear();
@@ -244,10 +270,10 @@ void RecoilControl::updateCurrentWeapon(const std::string& weapon) {
 
 void RecoilControl::updateAttachments(const WeaponSlotInfo& info) {
     std::lock_guard lock(mutex_);
-    scope_ = info.scope.empty() ? "hip" : info.scope;
-    grip_ = info.grip;
-    muzzle_ = info.muzzle;
-    stock_ = info.stock;
+    scope_ = info.scope.empty() ? "hip" : canonicalAttachmentKey(info.scope);
+    grip_ = canonicalAttachmentKey(info.grip);
+    muzzle_ = canonicalAttachmentKey(info.muzzle);
+    stock_ = canonicalAttachmentKey(info.stock);
 }
 
 void RecoilControl::updateStance(const std::string& stance) {
@@ -258,10 +284,11 @@ void RecoilControl::updateStance(const std::string& stance) {
 }
 
 double RecoilControl::multiplier(const std::unordered_map<std::string, std::vector<double>>& map, const std::string& key, double elapsed) const {
-    if (key.empty()) {
+    const std::string canonical_key = canonicalAttachmentKey(key);
+    if (canonical_key.empty()) {
         return 1.0;
     }
-    auto it = map.find(key);
+    auto it = map.find(canonical_key);
     if (it == map.end()) {
         return 1.0;
     }
@@ -272,6 +299,8 @@ double RecoilControl::calculateStrength(double elapsed) {
     if (current_weapon_.empty() || recoil_curve_.empty()) {
         return 0.0;
     }
+    const bool hip_aiming = hip_aim_vk_ != 0 && InputController::isKeyDown(hip_aim_vk_);
+    const double scope_mult = hip_aiming ? 1.0 : multiplier(scope_curves_, scope_, elapsed);
     double stance_mult = 1.0;
     if (auto wt = stance_multipliers_.find(weapon_type_); wt != stance_multipliers_.end()) {
         if (auto st = wt->second.find(stance_); st != wt->second.end()) {
@@ -279,7 +308,7 @@ double RecoilControl::calculateStrength(double elapsed) {
         }
     }
     return sampleCurve(recoil_curve_, elapsed, recoil_curve_step_)
-        * multiplier(scope_curves_, scope_, elapsed)
+        * scope_mult
         * multiplier(grip_curves_, grip_, elapsed)
         * multiplier(muzzle_curves_, muzzle_, elapsed)
         * multiplier(stock_curves_, stock_, elapsed)
@@ -293,6 +322,12 @@ void RecoilControl::workerLoop() {
     ScreenCapture capture;
     while (running_) {
         const double loop_start = nowSeconds();
+        if (reload_requested_.exchange(false)) {
+            std::lock_guard lock(mutex_);
+            const std::string weapon = current_weapon_;
+            loadConfig();
+            applyCurrentWeaponConfigLocked(weapon);
+        }
         double delay_seconds = 0.02;
         const bool left = InputController::isLeftMouseDown();
         const bool right = InputController::isKeyDown(VK_RBUTTON);

@@ -12,7 +12,7 @@ ElevationRadar::ElevationRadar(Config& config, RegionManager& regions, int fps)
         max_tpl_w_ = std::max(max_tpl_w_, tpl.cols);
         max_tpl_h_ = std::max(max_tpl_h_, tpl.rows);
     }
-    overlay_.create(L"PUBGAssistant Elevation", regions_.screenWidth(), regions_.screenHeight(), true);
+    regions_.createOverlay(overlay_, L"PUBGAssistant Elevation", true);
 }
 
 ElevationRadar::~ElevationRadar() {

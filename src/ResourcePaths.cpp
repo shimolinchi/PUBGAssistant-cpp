@@ -53,6 +53,14 @@ std::filesystem::path ResourcePaths::specialAssistantsFile() const {
     return configDir() / "special_assistants.json";
 }
 
+std::filesystem::path ResourcePaths::regionConfigDir() const {
+    return configDir() / "regions";
+}
+
+std::filesystem::path ResourcePaths::regionConfigFile(int width, int height) const {
+    return regionConfigDir() / (std::to_string(width) + "_" + std::to_string(height) + ".json");
+}
+
 std::filesystem::path ResourcePaths::templatesDir() const {
     return root_ / "assets" / "templates";
 }

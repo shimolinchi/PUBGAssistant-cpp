@@ -1,45 +1,59 @@
 #pragma once
 
 #include "Config.hpp"
+#include "OverlayWindow.hpp"
 
 namespace pubg {
 
-// 全局区域管理器，对应 Python 版 modules/region_manager.py 的核心数据部分。
-// 负责从 config.json 的 real_regions/real_scales 提供截图区域和比例尺。
 class RegionManager {
 public:
-    // 构造时读取当前屏幕尺寸，并同步 crosshair_region 到配置中。
-    explicit RegionManager(Config& config);
+    struct DisplayInfo {
+        int left = 0;
+        int top = 0;
+        int width = 1920;
+        int height = 1080;
+        int qt_left = 0;
+        int qt_top = 0;
+        int qt_width = 1920;
+        int qt_height = 1080;
+        double device_pixel_ratio = 1.0;
+        std::string name;
+    };
 
-    // 按名称读取真实截图区域，例如 "minimap_region"、"weapon_region"。
-    // 返回 nullopt 表示配置不存在或宽高无效。
+    explicit RegionManager(Config& config, DisplayInfo display);
+
     [[nodiscard]] std::optional<Rect> getRealRegion(const std::string& name) const;
-
-    // 按名称读取真实比例尺，例如 "largemap_1km_px"；找不到时返回 fallback。
     [[nodiscard]] double getRealScale(const std::string& name, double fallback = 0.0) const;
 
-    // 当前主显示器物理宽度，HUD 定位和全屏 overlay 使用。
     [[nodiscard]] int screenWidth() const noexcept { return screen_w_; }
-
-    // 当前主显示器物理高度，HUD 定位和全屏 overlay 使用。
     [[nodiscard]] int screenHeight() const noexcept { return screen_h_; }
+    [[nodiscard]] int screenLeft() const noexcept { return screen_left_; }
+    [[nodiscard]] int screenTop() const noexcept { return screen_top_; }
+    [[nodiscard]] int qtScreenLeft() const noexcept { return qt_screen_left_; }
+    [[nodiscard]] int qtScreenTop() const noexcept { return qt_screen_top_; }
+    [[nodiscard]] int qtScreenWidth() const noexcept { return qt_screen_w_; }
+    [[nodiscard]] int qtScreenHeight() const noexcept { return qt_screen_h_; }
+    [[nodiscard]] double devicePixelRatio() const noexcept { return device_pixel_ratio_; }
 
-    // 写入/更新某个真实截图区域。后续校准 UI 会调用。
     void setRealRegion(const std::string& name, Rect rect);
-
-    // 写入/更新某个比例尺。后续大地图 1km 校准会调用。
     void setRealScale(const std::string& name, double value);
+    bool createOverlay(OverlayWindow& overlay, const std::wstring& title, bool click_through = true,
+                       bool exclude_from_capture = true) const;
 
-    // 根据当前屏幕尺寸生成准星检测区域，对应 Python 版自动同步 crosshair_region 的逻辑。
     void syncCrosshairRegion();
-
-    // 迫击炮方向自动瞄准使用的顶部方向条区域；老配置可能只有 detection_regions.compass_region。
     void syncCompassRegion();
 
 private:
     Config& config_;
+    int screen_left_ = 0;
+    int screen_top_ = 0;
     int screen_w_ = 1920;
     int screen_h_ = 1080;
+    int qt_screen_left_ = 0;
+    int qt_screen_top_ = 0;
+    int qt_screen_w_ = 1920;
+    int qt_screen_h_ = 1080;
+    double device_pixel_ratio_ = 1.0;
 };
 
 } // namespace pubg

@@ -141,7 +141,7 @@ SpecialAssistants::SpecialAssistants(Config& config, RegionManager& regions, Min
                                      ElevationRadar& elevation, LargeMapRadar& large_map)
     : config_(config), regions_(regions), minimap_(minimap), elevation_(elevation), large_map_(large_map),
       ballistics_(config), hex_(config.markerHex()) {
-    overlay_.create(L"PUBGAssistant Special", regions_.screenWidth(), regions_.screenHeight(), true);
+    regions_.createOverlay(overlay_, L"PUBGAssistant Special", true);
     worker_ = std::thread(&SpecialAssistants::run, this);
 }
 

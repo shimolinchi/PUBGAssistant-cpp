@@ -35,7 +35,7 @@ public:
 
 private:
     // 在单个颜色 mask 中用标点 alpha 模板找候选点。
-    std::vector<TargetPoint> matchColorCandidates(const cv::Mat& mask, const MarkerColor& color);
+    std::vector<TargetPoint> matchColorCandidates(const cv::Mat& mask, const MarkerColor& color, double threshold);
 
     // 后台检测循环：截图、HSV 阈值、模板匹配、NMS、距离换算。
     void run();

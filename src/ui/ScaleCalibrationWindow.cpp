@@ -375,6 +375,7 @@ void ScaleCalibrationWindow::buildUi() {
     });
     connect(save, &QPushButton::clicked, this, &ScaleCalibrationWindow::saveConfig);
     connect(autoBtn, &QPushButton::clicked, this, &ScaleCalibrationWindow::runAutoSearch);
+    refreshRegionComboWarnings();
 }
 
 std::string ScaleCalibrationWindow::currentRegionKey() const {
@@ -418,6 +419,7 @@ void ScaleCalibrationWindow::applySize() {
 void ScaleCalibrationWindow::saveConfig() {
     applySize();
     config_.save();
+    refreshRegionComboWarnings();
     {
         QSignalBlocker bw(width_slider_);
         QSignalBlocker bh(height_slider_);
@@ -428,6 +430,24 @@ void ScaleCalibrationWindow::saveConfig() {
     height_scale_label_->setText("100%");
     result_label_->setText(QStringLiteral("配置已保存，截图继续实时刷新。"));
     updatePreview();
+}
+
+void ScaleCalibrationWindow::refreshRegionComboWarnings() {
+    if (!region_combo_) return;
+    const int current = region_combo_->currentIndex();
+    const auto settings = config_.read([](const Json& data) {
+        return data.value("region_scaling_settings", Json::object());
+    });
+    for (int i = 0; i < region_combo_->count(); ++i) {
+        const QString key = region_combo_->itemData(i).toString();
+        QString text = region_combo_->itemText(i);
+        text.remove(QStringLiteral("! "));
+        const auto k = key.toStdString();
+        const bool missing = !settings.contains(k) || !settings[k].is_object() ||
+            settings[k].value("width", 0) <= 0 || settings[k].value("height", 0) <= 0;
+        region_combo_->setItemText(i, missing ? QStringLiteral("! ") + text : text);
+    }
+    region_combo_->setCurrentIndex(current);
 }
 
 void ScaleCalibrationWindow::runAutoSearch() {

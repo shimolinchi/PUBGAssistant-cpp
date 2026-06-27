@@ -50,7 +50,7 @@
     ]
   },
   "mortar_config": {
-    "a_param": 4.5,
+    "a_param": 0.08,
     "auto_aim_distances": [
       121,
       133,
@@ -132,7 +132,7 @@
       699,
       700
     ],
-    "auto_aim_key_delay_ms": 3,
+    "auto_aim_key_delay_ms": 4,
     "auto_aim_reset_w_hold_ms": 1500,
     "direction_auto_aim_hold_ms": 180,
     "direction_auto_aim_kd": 0.012,
@@ -142,7 +142,7 @@
     "direction_auto_aim_max_ms": 1800,
     "direction_auto_aim_step_delay_ms": 2,
     "direction_auto_aim_tolerance_px": 4.0,
-    "b_param": 4.5,
+    "b_param": 0.08,
     "fpp_dists": [
       30.67,
       41.5,

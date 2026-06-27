@@ -19,6 +19,31 @@ bool Config::load() {
     return true;
 }
 
+bool Config::loadRegionProfile(int width, int height) {
+    std::unique_lock<std::shared_mutex> lock(mutex_);
+    active_region_w_ = width;
+    active_region_h_ = height;
+
+    Json profile;
+    const bool loaded = loadOptionalJsonFile(paths_.regionConfigFile(width, height), profile) && profile.is_object();
+    if (loaded) {
+        data_["real_regions"] = profile.value("real_regions", Json::object());
+        data_["real_scales"] = profile.value("real_scales", Json::object());
+        data_["region_scaling_settings"] = profile.value("region_scaling_settings", Json::object());
+    } else {
+        if (!data_.contains("real_regions") || !data_["real_regions"].is_object()) {
+            data_["real_regions"] = Json::object();
+        }
+        if (!data_.contains("real_scales") || !data_["real_scales"].is_object()) {
+            data_["real_scales"] = Json::object();
+        }
+        if (!data_.contains("region_scaling_settings") || !data_["region_scaling_settings"].is_object()) {
+            data_["region_scaling_settings"] = Json::object();
+        }
+    }
+    return loaded;
+}
+
 bool Config::save() {
     std::shared_lock<std::shared_mutex> lock(mutex_);
     std::filesystem::create_directories(paths_.configDir());
@@ -30,7 +55,18 @@ bool Config::save() {
         ? saveJsonFile(paths_.recoilSettingsFile(), data_["recoil_settings"])
         : true;
     const bool ok_special = saveJsonFile(paths_.specialAssistantsFile(), specialAssistantsConfig());
-    return ok_main && ok_map && ok_recoil && ok_special;
+    const bool ok_region = hasActiveRegionProfile()
+        ? saveJsonFile(paths_.regionConfigFile(active_region_w_, active_region_h_), regionProfileConfig())
+        : true;
+    return ok_main && ok_map && ok_recoil && ok_special && ok_region;
+}
+
+bool Config::saveRegionProfile() const {
+    std::shared_lock<std::shared_mutex> lock(mutex_);
+    if (!hasActiveRegionProfile()) {
+        return false;
+    }
+    return saveJsonFile(paths_.regionConfigFile(active_region_w_, active_region_h_), regionProfileConfig());
 }
 
 bool Config::loadJsonFile(const std::filesystem::path& path, Json& out) const {
@@ -89,6 +125,9 @@ Json Config::baseConfigWithoutSplitSections() const {
     Json base = data_;
     base.erase("map_data");
     base.erase("recoil_settings");
+    base.erase("real_regions");
+    base.erase("real_scales");
+    base.erase("region_scaling_settings");
     static constexpr std::array<const char*, 6> special_keys = {
         "throwables_config",
         "rocket_config",
@@ -101,6 +140,15 @@ Json Config::baseConfigWithoutSplitSections() const {
         base.erase(key);
     }
     return base;
+}
+
+Json Config::regionProfileConfig() const {
+    Json out = Json::object();
+    out["resolution"] = Json{{"width", active_region_w_}, {"height", active_region_h_}};
+    out["real_regions"] = data_.value("real_regions", Json::object());
+    out["real_scales"] = data_.value("real_scales", Json::object());
+    out["region_scaling_settings"] = data_.value("region_scaling_settings", Json::object());
+    return out;
 }
 
 Json Config::specialAssistantsConfig() const {
@@ -142,8 +190,6 @@ std::vector<MarkerColor> Config::markerColorsUnlocked() const {
         data_["pnt_color_modes"].contains(mode) &&
         data_["pnt_color_modes"][mode].is_object()) {
         source = &data_["pnt_color_modes"][mode];
-    } else if (data_.contains("pnt_colors") && data_["pnt_colors"].is_object()) {
-        source = &data_["pnt_colors"];
     }
 
     auto addColor = [&colors](const std::string& name, const Json& item) {

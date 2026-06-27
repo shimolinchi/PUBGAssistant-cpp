@@ -7,9 +7,15 @@
 #include <iostream>
 #include <tuple>
 #include <QApplication>
+#include <QDialog>
 #include <QGuiApplication>
+#include <QLabel>
 #include <QMetaObject>
+#include <QPushButton>
 #include <QScreen>
+#include <QVBoxLayout>
+
+#include "ui/Theme.hpp"
 
 #if defined(_WIN32) && defined(_DEBUG)
 #include <crtdbg.h>
@@ -39,15 +45,62 @@ void heapProbe(const char* where) {
 
 namespace pubg {
 
+namespace {
+
+Json screenSnapshot() {
+    Json screens = Json::array();
+    for (QScreen* screen : QGuiApplication::screens()) {
+        const QRect g = screen->geometry();
+        const double dpr = screen->devicePixelRatio();
+        screens.push_back(Json{
+            {"name", screen->name().toStdString()},
+            {"left", static_cast<int>(std::lround(g.left() * dpr))},
+            {"top", static_cast<int>(std::lround(g.top() * dpr))},
+            {"width", std::max(1, static_cast<int>(std::lround(g.width() * dpr)))},
+            {"height", std::max(1, static_cast<int>(std::lround(g.height() * dpr)))},
+        });
+    }
+    return screens;
+}
+
+bool sameScreenSnapshot(const Json& a, const Json& b) {
+    return a.dump() == b.dump();
+}
+
+RegionManager::DisplayInfo displayInfoFromScreen(QScreen* screen) {
+    if (!screen) {
+        return {};
+    }
+    const QRect g = screen->geometry();
+    const double dpr = screen->devicePixelRatio();
+    return RegionManager::DisplayInfo{
+        static_cast<int>(std::lround(g.left() * dpr)),
+        static_cast<int>(std::lround(g.top() * dpr)),
+        std::max(1, static_cast<int>(std::lround(g.width() * dpr))),
+        std::max(1, static_cast<int>(std::lround(g.height() * dpr))),
+        g.left(),
+        g.top(),
+        g.width(),
+        g.height(),
+        dpr,
+        screen->name().toStdString(),
+    };
+}
+
+} // namespace
+
 App::App()
     : paths_(),
       config_(paths_) {
     PUBG_HEAP_PROBE("ctor.start");
     config_.load();
     PUBG_HEAP_PROBE("ctor.afterConfigLoad");
+    const auto display = resolveGameDisplay();
+    config_.loadRegionProfile(display.width, display.height);
     migrateLegacyDefaultHotkeys();
     PUBG_HEAP_PROBE("ctor.afterHotkeyMigrate");
-    regions_ = std::make_unique<RegionManager>(config_);
+    config_.save();
+    regions_ = std::make_unique<RegionManager>(config_, display);
     PUBG_HEAP_PROBE("ctor.afterRegions");
     minimap_ = std::make_unique<MinimapRadar>(config_, *regions_, 60);
     PUBG_HEAP_PROBE("ctor.afterMinimap");
@@ -140,28 +193,32 @@ void App::registerHotkeys() {
         large_map_->toggleMode();
     });
     hotkeys_.addStateWatcher("mortar_auto_aim", hotkeyVk("mortar_auto_aim", "mouse_right"), [this](bool pressed) {
-        static std::atomic_uint64_t hold_session{0};
-        const auto session = ++hold_session;
         if (!pressed) {
+            ++mortar_auto_aim_hold_session_;
             return;
         }
+        const auto session = ++mortar_auto_aim_hold_session_;
+        joinMortarAutoAimHoldWorker();
         const int hold_ms = config_.read([](const Json& data) {
             return data.value("mortar_config", Json::object()).value("direction_auto_aim_hold_ms", 180);
         });
-        std::thread([this, session, hold_ms] {
-            std::this_thread::sleep_for(std::chrono::milliseconds(std::max(0, hold_ms)));
-            if (session != hold_session.load()) {
-                return;
-            }
-            bool can_trigger = false;
-            {
-                std::lock_guard lock(state_mutex_);
-                can_trigger = display_enabled_ && mortar_mounted_;
-            }
-            if (can_trigger && mortar_auto_aim_) {
-                mortar_auto_aim_->trigger(currentMarkerColor());
-            }
-        }).detach();
+        {
+            std::lock_guard worker_lock(mortar_auto_aim_hold_mutex_);
+            mortar_auto_aim_hold_worker_ = std::thread([this, session, hold_ms] {
+                std::this_thread::sleep_for(std::chrono::milliseconds(std::max(0, hold_ms)));
+                if (session != mortar_auto_aim_hold_session_.load()) {
+                    return;
+                }
+                bool can_trigger = false;
+                {
+                    std::lock_guard lock(state_mutex_);
+                    can_trigger = !shutting_down_ && display_enabled_ && mortar_mounted_;
+                }
+                if (can_trigger && mortar_auto_aim_) {
+                    mortar_auto_aim_->trigger(currentMarkerColor());
+                }
+            });
+        }
     });
     hotkeys_.addHotkey("toggle_window", hotkeyCombo("toggle_window", "<home>"), [this] {
         if (main_window_) {
@@ -173,6 +230,7 @@ void App::registerHotkeys() {
             std::lock_guard lock(state_mutex_);
             return weapon_detection_enabled_;
         }();
+        holdMortarStateForBlockingUi();
         if (enabled) {
             equipment_detector_->requestEquipmentConfirmation();
         }
@@ -207,12 +265,15 @@ void App::registerHotkeys() {
         {
             std::lock_guard lock(state_mutex_);
             left_pressed_ = pressed;
-            show_map_points = left_pressed_ && middle_pressed_ && current_weapon_.empty();
+            show_map_points = left_pressed_ && middle_pressed_;
             weapon_detection = weapon_detection_enabled_;
             if (!pressed) {
                 pending_weapon = pending_weapon_update_;
                 pending_weapon_update_.reset();
             }
+        }
+        if (show_map_points) {
+            show_map_points = canShowMapPointsNow();
         }
         if (pressed) {
             const auto [x, y] = InputController::cursorPosition();
@@ -233,7 +294,10 @@ void App::registerHotkeys() {
         {
             std::lock_guard lock(state_mutex_);
             middle_pressed_ = pressed;
-            show_map_points = left_pressed_ && middle_pressed_ && current_weapon_.empty();
+            show_map_points = left_pressed_ && middle_pressed_;
+        }
+        if (show_map_points) {
+            show_map_points = canShowMapPointsNow();
         }
         if (show_map_points) {
             map_points_->setEnabled(true);
@@ -263,6 +327,7 @@ void App::registerHotkeys() {
         if (!pressed) {
             return;
         }
+        holdMortarStateForBlockingUi();
         if (large_map_) {
             large_map_->cancel();
         }
@@ -306,6 +371,8 @@ void App::shutdown() {
     }
     PUBG_HEAP_PROBE("shutdown.enter");
     hotkeys_.stop();
+    ++mortar_auto_aim_hold_session_;
+    joinMortarAutoAimHoldWorker();
     ++mortar_mount_session_;
     joinMortarMountWorker();
     std::lock_guard control_lock(control_mutex_);
@@ -614,6 +681,7 @@ void App::cycleMarkerColor(int direction) {
 void App::updateWeaponFromDetectors(const std::string& weapon, double score) {
     if (InputController::isLeftMouseDown()) {
         std::lock_guard lock(state_mutex_);
+        current_weapon_icon_visible_ = !weapon.empty();
         pending_weapon_update_ = std::make_pair(weapon, score);
         return;
     }
@@ -628,6 +696,7 @@ void App::applyWeaponUpdate(const std::string& weapon, double score) {
     {
         std::lock_guard lock(state_mutex_);
         previous_weapon = current_weapon_;
+        current_weapon_icon_visible_ = !weapon.empty();
         ignore_empty_special_jitter = weapon.empty() && special_display_active_ &&
                                       shouldAutoUseMinimapForWeapon(previous_weapon);
         if (!ignore_empty_special_jitter) {
@@ -845,7 +914,12 @@ void App::handleManualGameMinimapToggle(bool pressed) {
     std::string current_weapon;
     {
         std::lock_guard lock(state_mutex_);
-        if (nowSeconds() < manual_minimap_toggle_ignore_until_) {
+        const double now = nowSeconds();
+        if (manual_minimap_toggle_ignore_until_ > 0.0 && now < manual_minimap_toggle_ignore_until_) {
+            // A quick second press of the in-game minimap key should leave the
+            // game minimap where it was, while the assistant display changes
+            // only once for this pair of key presses.
+            manual_minimap_toggle_ignore_until_ = 0.0;
             return;
         }
         should_close_assist_display = special_display_active_;
@@ -854,7 +928,7 @@ void App::handleManualGameMinimapToggle(bool pressed) {
         if (should_close_assist_display) {
             game_minimap_opened_by_app_ = false;
             manual_special_display_suppressed_ = true;
-            manual_minimap_toggle_ignore_until_ = nowSeconds() + 0.35;
+            manual_minimap_toggle_ignore_until_ = now + 0.32;
         } else {
             auto enabledFor = [&](const std::string& key) {
                 auto it = assistant_enabled_.find(key);
@@ -871,9 +945,10 @@ void App::handleManualGameMinimapToggle(bool pressed) {
             if (should_open_assist_display) {
                 game_minimap_opened_by_app_ = true;
                 manual_special_display_suppressed_ = false;
-                manual_minimap_toggle_ignore_until_ = nowSeconds() + 0.35;
+                manual_minimap_toggle_ignore_until_ = now + 0.32;
             } else {
                 game_minimap_opened_by_app_ = false;
+                manual_minimap_toggle_ignore_until_ = 0.0;
             }
         }
     }
@@ -904,6 +979,15 @@ void App::handleEscapeKey(bool pressed) {
         game_menu_active_ = false;
         game_menu_input_suppress_until_ = nowSeconds() + 0.45;
     }
+}
+
+void App::holdMortarStateForBlockingUi() {
+    std::lock_guard lock(state_mutex_);
+    if (!mortar_mounted_) {
+        return;
+    }
+    hold_mortar_until_reacquired_ = true;
+    game_menu_input_suppress_until_ = std::max(game_menu_input_suppress_until_, nowSeconds() + 2.0);
 }
 
 void App::setSpecialDisplayActive(bool active) {
@@ -1018,6 +1102,21 @@ void App::handleMortarInteractKey(bool pressed) {
     startMortarMountConfirmation();
 }
 
+void App::joinMortarAutoAimHoldWorker() {
+    std::thread worker;
+    {
+        std::lock_guard worker_lock(mortar_auto_aim_hold_mutex_);
+        if (!mortar_auto_aim_hold_worker_.joinable()) {
+            return;
+        }
+        if (mortar_auto_aim_hold_worker_.get_id() == std::this_thread::get_id()) {
+            return;
+        }
+        worker = std::move(mortar_auto_aim_hold_worker_);
+    }
+    worker.join();
+}
+
 void App::startMortarMountConfirmation() {
     const std::uint64_t session = ++mortar_mount_session_;
     joinMortarMountWorker();
@@ -1122,6 +1221,7 @@ void App::applyMortarMounted(bool mounted) {
         mortar_allowed = it != assistant_enabled_.end() && it->second;
         if (mounted) {
             current_weapon_ = "Mortar";
+            current_weapon_icon_visible_ = true;
             hold_mortar_until_reacquired_ = false;
             manual_special_display_suppressed_ = false;
             manual_minimap_toggle_ignore_until_ = 0.0;
@@ -1142,6 +1242,7 @@ void App::applyMortarMounted(bool mounted) {
         {
             std::lock_guard lock(state_mutex_);
             current_weapon_.clear();
+            current_weapon_icon_visible_ = false;
             pending_weapon_update_.reset();
             hold_mortar_until_reacquired_ = false;
             manual_special_display_suppressed_ = false;
@@ -1186,6 +1287,20 @@ void App::joinMortarMountWorker() {
 bool App::shouldShowMarkerIndicator() const {
     std::lock_guard lock(state_mutex_);
     return display_enabled_;
+}
+
+bool App::canShowMapPointsNow() const {
+    {
+        std::lock_guard lock(state_mutex_);
+        if (mortar_mounted_) {
+            return false;
+        }
+    }
+    if (!weapon_detector_) {
+        return true;
+    }
+    const auto [weapon, score] = weapon_detector_->currentWeapon();
+    return weapon.empty();
 }
 
 void App::updateAssistantRouting() {
@@ -1253,6 +1368,78 @@ void App::updateStatusHud() {
     status_hud_->setMarkerIndicatorVisible(display);
 }
 
+RegionManager::DisplayInfo App::resolveGameDisplay() {
+    const QList<QScreen*> screens = QGuiApplication::screens();
+    const Json current_snapshot = screenSnapshot();
+    const Json saved = config_.read([](const Json& data) {
+        return data.value("display_config", Json::object());
+    });
+    const bool has_saved = saved.is_object() && saved.contains("selected_screen");
+    const bool changed = has_saved && !sameScreenSnapshot(saved.value("screens", Json::array()), current_snapshot);
+
+    int selected_index = saved.value("selected_screen", Json::object()).value("index", 0);
+    const bool need_choose = screens.size() > 1 && (!has_saved || changed);
+
+    if (need_choose) {
+        QDialog dialog;
+        dialog.setWindowTitle(QStringLiteral("选择游戏显示器"));
+        ui::applyThemedPopupWindow(&dialog, config_);
+        dialog.setModal(true);
+        dialog.setFixedSize(320, 72 + screens.size() * 42);
+
+        auto* layout = new QVBoxLayout(&dialog);
+        layout->setContentsMargins(18, 42, 18, 16);
+        layout->setSpacing(8);
+        auto* label = new QLabel(changed
+            ? QStringLiteral("检测到显示器配置变动，请选择你游戏使用的显示器")
+            : QStringLiteral("请选择你游戏使用的显示器"), &dialog);
+        label->setWordWrap(true);
+        label->setAlignment(Qt::AlignCenter);
+        layout->addWidget(label);
+
+        for (int i = 0; i < screens.size(); ++i) {
+            QScreen* screen = screens[i];
+            const QRect g = screen->geometry();
+            auto* button = new QPushButton(QStringLiteral("%1  %2x%3").arg(screen->name()).arg(g.width()).arg(g.height()), &dialog);
+            button->setMinimumHeight(32);
+            layout->addWidget(button);
+            QObject::connect(button, &QPushButton::clicked, &dialog, [&dialog, &selected_index, i] {
+                selected_index = i;
+                dialog.accept();
+            });
+        }
+        if (dialog.exec() != QDialog::Accepted) {
+            selected_index = std::clamp(selected_index, 0, std::max(0, static_cast<int>(screens.size()) - 1));
+        }
+    }
+
+    if (screens.empty()) {
+        selected_index = 0;
+    } else {
+        selected_index = std::clamp(selected_index, 0, static_cast<int>(screens.size()) - 1);
+    }
+    QScreen* selected_screen = screens.empty() ? QGuiApplication::primaryScreen() : screens[selected_index];
+    RegionManager::DisplayInfo display = displayInfoFromScreen(selected_screen);
+
+    config_.write([&](Json& data) {
+        data["display_config"]["screens"] = current_snapshot;
+        data["display_config"]["selected_screen"] = Json{
+            {"index", selected_index},
+            {"name", display.name},
+            {"left", display.left},
+            {"top", display.top},
+            {"width", display.width},
+            {"height", display.height},
+            {"qt_left", display.qt_left},
+            {"qt_top", display.qt_top},
+            {"qt_width", display.qt_width},
+            {"qt_height", display.qt_height},
+            {"device_pixel_ratio", display.device_pixel_ratio},
+        };
+    });
+    return display;
+}
+
 void App::printStatus() const {
     bool weapon_detection = false;
     bool display = false;
@@ -1295,19 +1482,20 @@ int App::run() {
     callbacks.refresh_status_hud = [this] { updateStatusHud(); };
     callbacks.reload_hotkeys = [this] { reloadHotkeys(); };
     callbacks.shutdown = [this] { shutdown(); };
-    pubg::ui::MainWindow window(config_, *regions_, *minimap_, *elevation_, *weapon_detector_,
-                                *equipment_detector_, *gesture_identifier_, *recoil_, *special_,
-                                *map_points_, *large_map_, *throwables_, *c4_, std::move(callbacks));
-    main_window_ = &window;
-    if (auto* screen = QGuiApplication::primaryScreen()) {
-        window.move(screen->availableGeometry().topLeft());
-    } else {
-        window.move(0, 0);
+    int code = 0;
+    {
+        pubg::ui::MainWindow window(config_, *regions_, *minimap_, *elevation_, *weapon_detector_,
+                                    *equipment_detector_, *gesture_identifier_, *recoil_, *special_,
+                                    *map_points_, *large_map_, *throwables_, *c4_, std::move(callbacks));
+        main_window_ = &window;
+        window.move(regions_->qtScreenLeft(), regions_->qtScreenTop());
+        window.show();
+        hotkeys_.start();
+        code = QApplication::exec();
+        main_window_ = nullptr;
+        PUBG_HEAP_PROBE("run.afterExec");
     }
-    window.show();
-    hotkeys_.start();
-    const int code = QApplication::exec();
-    main_window_ = nullptr;
+    PUBG_HEAP_PROBE("run.afterWindowDestroyed");
     shutdown();
     return code;
 }

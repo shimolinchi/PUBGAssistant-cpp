@@ -109,9 +109,13 @@ if(WIN32)
 endif()
 
 add_custom_command(TARGET PUBGAssistant-cpp POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E remove_directory
+        $<TARGET_FILE_DIR:PUBGAssistant-cpp>/assets
     COMMAND ${CMAKE_COMMAND} -E copy_directory
         ${CMAKE_SOURCE_DIR}/assets
         $<TARGET_FILE_DIR:PUBGAssistant-cpp>/assets
+    COMMAND ${CMAKE_COMMAND} -E remove_directory
+        $<TARGET_FILE_DIR:PUBGAssistant-cpp>/config
     COMMAND ${CMAKE_COMMAND} -E copy_directory
         ${CMAKE_SOURCE_DIR}/config
         $<TARGET_FILE_DIR:PUBGAssistant-cpp>/config

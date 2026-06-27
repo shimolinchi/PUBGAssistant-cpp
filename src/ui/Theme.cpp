@@ -230,7 +230,7 @@ UiTheme uiThemeFromName(const std::string& name) {
 
 UiTheme currentUiTheme(Config& config) {
     const auto name = config.read([](const Json& data) {
-        return data.value("ui_state", Json::object()).value("theme", Json::object()).value("name", std::string("light"));
+        return data.value("ui_state", Json::object()).value("theme", Json::object()).value("name", std::string("navy"));
     });
     return uiThemeFromName(name);
 }

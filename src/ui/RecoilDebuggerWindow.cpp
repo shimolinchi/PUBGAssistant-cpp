@@ -166,7 +166,11 @@ void RecoilDebuggerWindow::buildUi() {
     connect(sub001, &QPushButton::clicked, this, [this] { curve_editor_->nudgeSelectedY(-0.01); });
     connect(add001, &QPushButton::clicked, this, [this] { curve_editor_->nudgeSelectedY(0.01); });
     connect(add01, &QPushButton::clicked, this, [this] { curve_editor_->nudgeSelectedY(0.1); });
-    connect(save, &QPushButton::clicked, this, &RecoilDebuggerWindow::saveAndApply);
+    connect(save, &QPushButton::clicked, this, [this, save] {
+        save->setEnabled(false);
+        saveAndApply();
+        save->setEnabled(true);
+    });
     connect(weapon_combo_, &QComboBox::currentTextChanged, this, &RecoilDebuggerWindow::reloadCurves);
     connect(curve_type_combo_, &QComboBox::currentIndexChanged, this, &RecoilDebuggerWindow::reloadCurves);
     connect(scope_combo_, &QComboBox::currentIndexChanged, this, &RecoilDebuggerWindow::reloadCurves);
@@ -209,7 +213,7 @@ void RecoilDebuggerWindow::reloadOptions() {
     addKeyItem(grip_combo_, QStringLiteral("半截握把"), QStringLiteral("half"));
     addKeyItem(grip_combo_, QStringLiteral("轻型握把"), QStringLiteral("light"));
     addKeyItem(grip_combo_, QStringLiteral("拇指握把"), QStringLiteral("thumb"));
-    addKeyItem(grip_combo_, QStringLiteral("直角握把"), QStringLiteral("tilted"));
+    addKeyItem(grip_combo_, QStringLiteral("斜向握把"), QStringLiteral("tilted"));
     addKeyItem(grip_combo_, QStringLiteral("激光瞄准器"), QStringLiteral("laser"));
 
     muzzle_combo_->clear();
@@ -428,7 +432,7 @@ void RecoilDebuggerWindow::saveAndApply() {
     curve_editor_->clearUndoHistory();
     recoil_.reloadConfig();
     reloadCurves();
-    status_label_->setText(QStringLiteral("参数已保存、重载并应用。"));
+    status_label_->setText(QStringLiteral("参数已保存，后台正在应用。"));
 }
 
 } // namespace pubg::ui

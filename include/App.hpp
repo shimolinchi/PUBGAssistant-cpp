@@ -80,16 +80,20 @@ private:
     void closeGameMinimapForAssist();
     void handleManualGameMinimapToggle(bool pressed);
     void handleEscapeKey(bool pressed);
+    void holdMortarStateForBlockingUi();
     bool gameMenuInputSuppressed() const;
     bool shouldHoldMortarStateAfterEsc() const;
     void handleMortarInteractKey(bool pressed);
+    void joinMortarAutoAimHoldWorker();
     void startMortarMountConfirmation();
     void setMortarMounted(bool mounted);
     void applyMortarMounted(bool mounted);
     void joinMortarMountWorker();
     bool shouldShowMarkerIndicator() const;
+    bool canShowMapPointsNow() const;
     bool isRecoilWeapon(const std::string& weapon) const;
     void syncRecoilAttachmentsForCurrentWeapon();
+    RegionManager::DisplayInfo resolveGameDisplay();
 
     // 资源路径和全局配置。必须先 load config，再构造依赖配置的模块。
     ResourcePaths paths_;
@@ -121,6 +125,7 @@ private:
     bool special_display_active_ = false;
     bool recoil_enabled_ = false;
     std::string current_weapon_;
+    bool current_weapon_icon_visible_ = false;
     bool left_pressed_ = false;
     bool middle_pressed_ = false;
     bool right_pressed_ = false;
@@ -135,6 +140,9 @@ private:
     std::atomic_uint64_t mortar_mount_session_{0};
     std::mutex mortar_mount_mutex_;
     std::thread mortar_mount_worker_;
+    std::atomic_uint64_t mortar_auto_aim_hold_session_{0};
+    std::mutex mortar_auto_aim_hold_mutex_;
+    std::thread mortar_auto_aim_hold_worker_;
     std::vector<std::string> marker_color_order_{"Yellow", "Orange", "Blue", "Green"};
     std::string current_marker_color_ = "Yellow";
     std::map<int, WeaponSlotInfo> equipment_;

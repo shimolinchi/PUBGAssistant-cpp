@@ -48,7 +48,7 @@ LargeMapRadar::LargeMapRadar(Config& config, RegionManager& regions)
         max_tpl_w_ = std::max(max_tpl_w_, tpl.cols);
         max_tpl_h_ = std::max(max_tpl_h_, tpl.rows);
     }
-    overlay_.create(L"PUBGAssistant LargeMap", regions_.screenWidth(), regions_.screenHeight(), true);
+    regions_.createOverlay(overlay_, L"PUBGAssistant LargeMap", true);
     worker_ = std::thread(&LargeMapRadar::workerLoop, this);
 }
 
@@ -187,8 +187,10 @@ void LargeMapRadar::processSingleFrame(int player_x, int player_y) {
     cv::Mat hsv;
     cv::cvtColor(bgr, hsv, cv::COLOR_BGR2HSV);
     DistanceMap next;
-    const double fallback_px = config_.read([](const Json& d) { return d.value("map_1km_pixels", 540.0); });
-    const double km_px = regions_.getRealScale("largemap_1km_px", fallback_px);
+    const double km_px = regions_.getRealScale("largemap_1km_px", 540.0);
+    const double match_threshold = config_.read([](const Json& data) {
+        return data.value("pnt_detection", Json::object()).value("largemap_threshold", 0.62);
+    });
     std::vector<MarkerColor> colors;
     {
         std::lock_guard lock(mutex_);
@@ -241,7 +243,7 @@ void LargeMapRadar::processSingleFrame(int player_x, int player_y) {
                 double max_val = 0.0;
                 cv::Point max_loc;
                 cv::minMaxLoc(res, nullptr, &max_val, nullptr, &max_loc);
-                if (std::isfinite(max_val) && max_val >= 0.70 && max_val > best_score) {
+                if (std::isfinite(max_val) && max_val >= match_threshold && max_val > best_score) {
                     best_score = max_val;
                     best = cv::Point2d(x1 + max_loc.x + tpl.cols / 2.0,
                                        static_cast<double>(y1 + max_loc.y + tpl.rows));

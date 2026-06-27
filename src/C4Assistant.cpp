@@ -20,7 +20,7 @@ C4Assistant::C4Assistant(Config& config, RegionManager& regions, MinimapRadar& m
     });
     target_speed_ = cfg.value("target_speed", target_speed_);
     jump_distance_threshold_ = cfg.value("jump_distance_threshold", jump_distance_threshold_);
-    overlay_.create(L"PUBGAssistant C4", regions_.screenWidth(), regions_.screenHeight(), true);
+    regions_.createOverlay(overlay_, L"PUBGAssistant C4", true);
     worker_ = std::thread(&C4Assistant::updateLoop, this);
 }
 

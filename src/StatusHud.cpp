@@ -19,7 +19,7 @@ const std::unordered_map<std::string, std::string> kScopeNames{
 };
 
 const std::unordered_map<std::string, std::string> kGripNames{
-    {"vertical", "垂直"}, {"half", "半截"}, {"tilted", "斜握"},
+    {"vertical", "垂直"}, {"half", "半截"}, {"tilted", "斜向"},
     {"light", "轻握"}, {"laser", "激光"}, {"thumb", "拇指"},
 };
 
@@ -51,7 +51,7 @@ StatusHud::StatusHud(Config& config, RegionManager& regions) : config_(config), 
     marker_hex_ = config_.markerHex();
     equipment_[1] = {};
     equipment_[2] = {};
-    overlay_.create(L"PUBGAssistant Status", regions_.screenWidth(), regions_.screenHeight(), true);
+    regions_.createOverlay(overlay_, L"PUBGAssistant Status", true);
     message_worker_ = std::thread(&StatusHud::messageLoop, this);
     render();
 }

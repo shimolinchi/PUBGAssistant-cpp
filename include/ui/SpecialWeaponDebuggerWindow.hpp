@@ -18,6 +18,9 @@ class SpecialWeaponDebuggerWindow : public QWidget {
 public:
     SpecialWeaponDebuggerWindow(Config& config, QWidget* parent = nullptr);
 
+signals:
+    void saved();
+
 private:
     void buildUi();
     void renderCurrentWeapon();

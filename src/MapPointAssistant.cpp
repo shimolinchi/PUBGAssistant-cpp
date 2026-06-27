@@ -24,7 +24,7 @@ PointCategoryStyle styleForCategory(const std::string& key) {
 
 MapPointAssistant::MapPointAssistant(Config& config, RegionManager& regions)
     : config_(config), regions_(regions) {
-    overlay_.create(L"PUBGAssistant MapPoints", regions_.screenWidth(), regions_.screenHeight(), true);
+    regions_.createOverlay(overlay_, L"PUBGAssistant MapPoints", true);
     overlay_.show(false);
 }
 
@@ -94,7 +94,15 @@ void MapPointAssistant::render() {
             return Json();
         }
         const auto& maps = root["map_data"];
-        return maps.contains(current_map) ? maps[current_map] : Json();
+        if (maps.contains(current_map)) {
+            return maps[current_map];
+        }
+        std::string normalized = current_map;
+        const auto paren = normalized.find('(');
+        if (paren != std::string::npos && paren > 0 && normalized[paren - 1] != ' ') {
+            normalized.insert(paren, " ");
+        }
+        return maps.contains(normalized) ? maps[normalized] : Json();
     });
     if (!data.is_object()) {
         return;

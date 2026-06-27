@@ -125,11 +125,6 @@ void HotkeyManager::pollLoop() {
             std::lock_guard lock(mutex_);
             for (auto& hk : hotkeys_) {
                 if (!hk.combo.key) continue;
-#ifdef _WIN32
-                if (!hk.mouse && hook_ready_) {
-                    continue;
-                }
-#endif
                 bool down = InputController::isKeyDown(hk.combo.key);
                 for (const int modifier : hk.combo.modifiers) {
                     if (!InputController::isKeyDown(modifier)) {

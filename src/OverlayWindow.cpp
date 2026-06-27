@@ -12,6 +12,8 @@ namespace pubg {
 namespace {
 ULONG_PTR g_gdiplus_token = 0;
 std::mutex g_gdiplus_mutex;
+constexpr UINT kOverlayRenderMessage = WM_APP + 0x431;
+constexpr UINT kOverlayShowMessage = WM_APP + 0x432;
 
 void ensureGdiplus() {
     std::lock_guard lock(g_gdiplus_mutex);
@@ -52,9 +54,21 @@ const wchar_t* fontFamilyName() {
 OverlayWindow::OverlayWindow() = default;
 
 OverlayWindow::~OverlayWindow() {
+    close();
+}
+
+void OverlayWindow::close() {
 #ifdef _WIN32
-    if (hwnd_) {
-        DestroyWindow(hwnd_);
+    HWND hwnd = hwnd_;
+    if (hwnd) {
+        destroying_.store(true);
+        if (isOwnerThread()) {
+            DestroyWindow(hwnd);
+        } else {
+            SendMessageW(hwnd, WM_CLOSE, 0, 0);
+        }
+        hwnd_ = nullptr;
+        owner_thread_id_ = 0;
     }
 #endif
 }
@@ -65,6 +79,17 @@ bool OverlayWindow::create(const std::wstring& title, int width, int height, boo
 
 bool OverlayWindow::create(const std::wstring& title, int width, int height, bool click_through,
                            bool exclude_from_capture) {
+    return createAt(title, 0, 0, width, height, click_through, exclude_from_capture);
+}
+
+bool OverlayWindow::createAt(const std::wstring& title, int left, int top, int width, int height,
+                             bool click_through, bool exclude_from_capture) {
+    close();
+#ifdef _WIN32
+    destroying_.store(false);
+#endif
+    left_ = left;
+    top_ = top;
     width_ = width;
     height_ = height;
 #ifdef _WIN32
@@ -86,10 +111,11 @@ bool OverlayWindow::create(const std::wstring& title, int width, int height, boo
     }
     hwnd_ = CreateWindowExW(
         ex, cls, title.c_str(), WS_POPUP,
-        0, 0, width, height, nullptr, nullptr, GetModuleHandleW(nullptr), this);
+        left, top, width, height, nullptr, nullptr, GetModuleHandleW(nullptr), this);
     if (!hwnd_) {
         return false;
     }
+    owner_thread_id_ = GetCurrentThreadId();
     ShowWindow(hwnd_, SW_SHOW);
     if (exclude_from_capture) {
         constexpr DWORD kWdaExcludeFromCapture = 0x00000011;
@@ -101,6 +127,8 @@ bool OverlayWindow::create(const std::wstring& title, int width, int height, boo
     return true;
 #else
     (void)title;
+    (void)left;
+    (void)top;
     (void)click_through;
     (void)exclude_from_capture;
     return false;
@@ -109,8 +137,12 @@ bool OverlayWindow::create(const std::wstring& title, int width, int height, boo
 
 void OverlayWindow::show(bool visible) {
 #ifdef _WIN32
-    if (hwnd_) {
-        ShowWindow(hwnd_, visible ? SW_SHOW : SW_HIDE);
+    if (hwnd_ && !destroying_.load()) {
+        if (isOwnerThread()) {
+            ShowWindow(hwnd_, visible ? SW_SHOW : SW_HIDE);
+        } else {
+            PostMessageW(hwnd_, kOverlayShowMessage, visible ? 1 : 0, 0);
+        }
     }
 #else
     (void)visible;
@@ -118,13 +150,18 @@ void OverlayWindow::show(bool visible) {
 }
 
 void OverlayWindow::setCommands(std::vector<OverlayCommand> commands) {
+#ifdef _WIN32
+    if (destroying_.load()) {
+        return;
+    }
+#endif
     {
         std::lock_guard lock(mutex_);
         commands_ = std::move(commands);
     }
 #ifdef _WIN32
     if (hwnd_) {
-        renderLayered();
+        requestRender();
     }
 #endif
 }
@@ -135,6 +172,9 @@ void OverlayWindow::clear() {
 
 void OverlayWindow::pumpMessages() {
 #ifdef _WIN32
+    if (!isOwnerThread()) {
+        return;
+    }
     MSG msg;
     while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
         TranslateMessage(&msg);
@@ -152,8 +192,23 @@ bool OverlayWindow::created() const noexcept {
 }
 
 #ifdef _WIN32
+bool OverlayWindow::isOwnerThread() const {
+    return owner_thread_id_ == 0 || GetCurrentThreadId() == owner_thread_id_;
+}
+
+void OverlayWindow::requestRender() {
+    if (!hwnd_ || destroying_.load()) {
+        return;
+    }
+    if (isOwnerThread()) {
+        renderLayered();
+    } else {
+        PostMessageW(hwnd_, kOverlayRenderMessage, 0, 0);
+    }
+}
+
 void OverlayWindow::renderLayered() {
-    if (!hwnd_ || width_ <= 0 || height_ <= 0) {
+    if (!hwnd_ || destroying_.load() || width_ <= 0 || height_ <= 0) {
         return;
     }
     ensureGdiplus();
@@ -285,7 +340,7 @@ void OverlayWindow::renderLayered() {
     }
 
     POINT src{0, 0};
-    POINT dst{0, 0};
+    POINT dst{left_, top_};
     SIZE size{width_, height_};
     BLENDFUNCTION blend{AC_SRC_OVER, 0, 255, AC_SRC_ALPHA};
     UpdateLayeredWindow(hwnd_, screen_dc, &dst, &size, mem_dc, &src, 0, &blend, ULW_ALPHA);
@@ -308,6 +363,31 @@ LRESULT CALLBACK OverlayWindow::wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM l
         if (self) {
             self->paint();
             return 0;
+        }
+        break;
+    case kOverlayRenderMessage:
+        if (self && !self->destroying_.load()) {
+            self->renderLayered();
+            return 0;
+        }
+        break;
+    case kOverlayShowMessage:
+        if (self && !self->destroying_.load()) {
+            ShowWindow(hwnd, wp ? SW_SHOW : SW_HIDE);
+            return 0;
+        }
+        break;
+    case WM_CLOSE:
+        if (self) {
+            self->destroying_.store(true);
+        }
+        DestroyWindow(hwnd);
+        return 0;
+    case WM_NCDESTROY:
+        if (self) {
+            SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
+            self->hwnd_ = nullptr;
+            self->owner_thread_id_ = 0;
         }
         break;
     case WM_ERASEBKGND:

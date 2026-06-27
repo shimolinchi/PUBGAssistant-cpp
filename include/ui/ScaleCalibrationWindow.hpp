@@ -39,6 +39,7 @@ private:
     void reloadTemplates();
     void updateSizeFromSliders();
     void loadTemplatePreview();
+    void refreshRegionComboWarnings();
     void stopRefresh();
     void startRefresh();
     [[nodiscard]] std::string currentRegionKey() const;
