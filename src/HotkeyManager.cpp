@@ -90,6 +90,18 @@ bool HotkeyManager::isRunning() const {
     return running_;
 }
 
+bool HotkeyManager::physicalKeyDown(int vk) {
+#ifdef _WIN32
+    if (vk < 0 || vk >= static_cast<int>(key_down_.size())) {
+        return false;
+    }
+    std::lock_guard lock(mutex_);
+    return key_down_[static_cast<size_t>(vk)];
+#else
+    return InputController::isKeyDown(vk);
+#endif
+}
+
 void HotkeyManager::clear() {
     stop();
     std::lock_guard lock(mutex_);
@@ -125,6 +137,11 @@ void HotkeyManager::pollLoop() {
             std::lock_guard lock(mutex_);
             for (auto& hk : hotkeys_) {
                 if (!hk.combo.key) continue;
+#ifdef _WIN32
+                if (!hk.mouse && hook_ready_) {
+                    continue;
+                }
+#endif
                 bool down = InputController::isKeyDown(hk.combo.key);
                 for (const int modifier : hk.combo.modifiers) {
                     if (!InputController::isKeyDown(modifier)) {

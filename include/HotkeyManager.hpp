@@ -54,6 +54,9 @@ public:
     // 当前是否处于运行状态。
     [[nodiscard]] bool isRunning() const;
 
+    // 查询低级键盘钩子看到的真实物理按键状态；SendInput 注入按键不会更新这个状态。
+    [[nodiscard]] bool physicalKeyDown(int vk);
+
     // 清空所有已注册热键。重载配置时在 stop() 后调用。
     void clear();
 

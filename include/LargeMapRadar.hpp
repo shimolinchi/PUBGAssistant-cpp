@@ -25,6 +25,7 @@ public:
 
     // 进入/退出一次性测距模式。主窗口 F4 会调用。
     void toggleMode();
+    void startManualMeasure();
 
     // 取消当前等待/计算状态。
     void cancel();
@@ -35,6 +36,7 @@ public:
     // 最近一次测得的各颜色标点距离。
     [[nodiscard]] DistanceMap measuredDistance() const;
     [[nodiscard]] bool isBusy() const;
+    [[nodiscard]] bool isManualMeasureActive() const;
 
 private:
     // 常驻工作线程循环：等待点击投递的测距任务并执行，避免在输入钩子线程上做重活。
@@ -59,6 +61,13 @@ private:
     std::atomic_bool stop_{false};
     bool waiting_click_ = false;
     bool calculating_ = false;
+    bool manual_waiting_first_ = false;
+    bool manual_waiting_second_ = false;
+    int manual_x1_ = 0;
+    int manual_y1_ = 0;
+    int manual_x2_ = 0;
+    int manual_y2_ = 0;
+    double manual_distance_m_ = 0.0;
     std::atomic_bool cancel_requested_{false};
     // 待处理的一次性测距任务：点击在钩子线程写入，工作线程取出执行。
     bool job_pending_ = false;

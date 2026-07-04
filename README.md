@@ -1,93 +1,262 @@
-# PUBGAssistant C++ Port
+# PUBGAssistant-cpp 使用说明
 
-This is a parallel C++ port of the Python PUBGAssistance project.
+PUBGAssistant-cpp 是 PUBGAssistant 的 C++/Qt 版本，用于在游戏中提供识别区域校准、地图点位显示、测距显示、特殊武器辅助、投掷物提示、压枪参数调试等功能。使用前请确认你了解并遵守游戏规则及平台规定；所有按键、区域和参数都需要按自己的游戏设置校准。
 
-The project is intentionally created next to the original Python project so the
-Python version can stay untouched while the C++ version is tested and tuned on
-Windows.
+## 目录结构与构建约定
 
-## Toolchain
-
-- Visual Studio 2022
-- MSVC x64
-- CMake 3.24+
-- vcpkg
-- Qt 6 Widgets
-
-## Visual Studio Setup
-
-Use a short ASCII path with no spaces for this project, for example:
+项目建议放在短英文路径中，例如：
 
 ```text
 C:\Projects\PUBGAssistant-cpp
 ```
 
-Avoid building from OneDrive, Chinese paths, or paths containing spaces. Some
-third-party vcpkg build scripts used by Qt/OpenCV are sensitive to those paths.
-The included presets keep build output, vcpkg downloads, and temporary files
-inside this project under `.build/`, `.vcpkg-downloads/`, and `.tmp/`.
+不要放在 OneDrive、中文路径或带空格的路径下，避免 vcpkg、Qt、OpenCV 在恢复依赖或构建时失败。
 
-This project is intended to be opened as a CMake folder in Visual Studio:
+所有构建、缓存、临时文件都应保留在项目目录内部：
 
-1. Open Visual Studio.
-2. Choose `File > Open > Folder...`.
-3. Select this project folder.
-4. Select the `Windows x64 Debug` CMake preset.
-5. Build and run the `PUBGAssistant-cpp` target.
-
-Do not use the initial `.slnx/.vcxproj` as the primary entry point yet. It was
-created before the source tree and does not describe the Qt/CMake build. Opening
-the folder lets Visual Studio read `CMakePresets.json`, run vcpkg manifest mode,
-generate Qt moc files, and copy `assets/`, `config/`, and `icon.ico` beside the
-executable after build.
-
-The repository includes `vcpkg.json` and `CMakePresets.json`, so Visual Studio
-can use manifest-mode vcpkg to restore these dependencies automatically:
-
-- `opencv4` with only the image-processing/image-loading features this project
-  currently needs
-- `nlohmann-json`
-- `qtbase` with GUI/Widgets
-
-The preset also sets `HTTP_PROXY` and `HTTPS_PROXY` to `http://127.0.0.1:7890`
-because the current Windows proxy detected by vcpkg is a local HTTP proxy.
-Change or remove those values in `CMakePresets.json` if your proxy uses another
-port or if you do not use a proxy.
-
-If vcpkg fails while downloading MSYS2 packages with `curl operation failed with
-error code 35 (SSL connect error)`, the project files are configured correctly,
-but the local proxy/mirror connection needs to be fixed before dependency
-restore can finish. Re-run CMake configuration after the proxy is working.
-
-## Manual Dependencies
-
-```bat
-vcpkg install --triplet x64-windows --x-manifest-root=.
+```text
+.build/
+.tmp/
+.vcpkg-downloads/
+.vcpkg-binary-cache/
+.vcpkg-registries/
 ```
 
-## Manual Build
+不要再使用旧的外部构建目录，例如 `C:\pubgassistant-build`、`C:\pubgassistant-temp`、`C:\vcpkg-downloads-pubgassistant`。
+
+## Visual Studio 编译方式
+
+请使用 Visual Studio 的 CMake Folder 模式：
+
+1. 打开 Visual Studio。
+2. 选择 `File > Open > Folder...`。
+3. 打开 `C:\Projects\PUBGAssistant-cpp`。
+4. 在顶部选择 CMake preset。
+5. Debug 使用 `windows-x64-debug`。
+6. Release 使用 `windows-x64-release`。
+
+不要把 `.slnx` 或 `.vcxproj` 当作主要入口打开。这个项目以 `CMakePresets.json` 为准，Visual Studio 打开文件夹后会自动识别 CMake preset、恢复 vcpkg 依赖、生成 Qt moc 文件，并在编译后复制 `assets/`、`config/`、`icon.ico`、可选的 `README.pdf`。
+
+命令行 Debug 构建示例：
 
 ```bat
-cmake --preset windows-x64-debug
-cmake --build --preset windows-x64-debug
+cmd.exe /d /c "call ""C:\Program Files\Microsoft Visual Studio\18\Community\VC\Auxiliary\Build\vcvars64.bat"" && ""C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe"" --build --preset windows-x64-debug"
 ```
 
-You can also open this folder directly in Visual Studio 2022.
+Debug 输出：
 
-## Runtime Files
+```text
+C:\Projects\PUBGAssistant-cpp\.build\debug\PUBGAssistant-cpp.exe
+```
 
-The application expects these files next to the executable or in the project
-root during debugging:
+Release 打包输出：
 
-- `config/config.json`
-- `assets/templates`
+```text
+C:\Projects\PUBGAssistant-cpp\.build\package\release
+```
 
-The initial port keeps the Python data layout so template names and
-configuration fields stay compatible.
+发布给其他电脑时，应使用 `.build/package/release` 中的文件，不要直接复制 `.build/release`。`.build/release` 是构建工作目录，可能包含不适合分发的中间文件或调试依赖。Debug 版本可能依赖 `VCRUNTIME140D.dll`、`ucrtbased.dll` 等调试运行库，不适合给普通电脑使用。
 
-## Current Scope
+## 首次使用流程
 
-The C++ project now includes the Qt main panel, region calibration, map point
-assistant, large-map `F4` measurement flow, throwable auto-release, C4 prompts,
-SR breath tracking, and the main debugger/calibrator windows. Final timing and
-visual parity should be checked on Windows in the actual game environment.
+1. 在游戏中选择固定的色盲模式，并在程序中选择一致的色盲模式。
+2. 进入 `系统设置`，点击 `识别区域设置`，按右侧预览图校准区域框。
+3. 点击 `识别区域缩放设置`，校准武器图标、武器名、姿势等模板缩放比例。
+4. 点击 `按键设置`，把游戏内同步按键改成和游戏中一致。
+5. 游戏中的开火按键不要使用鼠标左键，应改成键盘上不常用的按键，并在程序中同步设置为同一个键。
+6. 游戏中灵敏度建议全部保持默认，常规灵敏度为 50，垂直灵敏度为 1。修改灵敏度后，压枪和特殊武器参数通常需要重新调整。
+7. 更换分辨率、显示器、Windows 缩放、游戏 UI 比例后，需要重新检查当前分辨率的区域框和缩放校准。
+
+如果当前分辨率下某些区域或缩放参数未校准，主窗口对应按钮会显示红色提示。完成校准后提示会自动消失。
+
+## 主窗口选项卡
+
+### 地图点位
+
+用于选择地图、点位大小、色盲模式和点位类别。主窗口中为了节省空间，部分点位类别会合并显示；地图上的实际点位仍按原始分类显示。
+
+### 启动助手
+
+这里的按钮是功能开关。特殊武器按钮默认开启，关闭后即使识别到对应武器，也不会触发该助手。压枪、连狙点压、狙击枪呼吸晃动稳定、自动闪身喷也可以单独关闭。
+
+### 系统设置
+
+包含这些入口：
+
+- 显示所有区域框
+- 识别区域设置
+- 识别区域缩放设置
+- 按键设置
+- 压枪参数设置
+- 特殊武器参数设置
+- 界面设置
+
+### 使用说明
+
+显示简短首次使用步骤。完整文档由程序同目录下的 `README.pdf` 提供，点击 `查看完整使用说明文档` 时会直接读取 exe 同目录的 `README.pdf`。
+
+## 默认快捷键
+
+| 功能 | 默认按键 | 说明 |
+| --- | --- | --- |
+| 武器检测开关 | F1 | 控制手持武器、装备栏、姿势等识别 |
+| 测距瞄准显示开关 | F2 | 特殊武器、测距、标点显示层总开关 |
+| 辅助压枪开关 | F3 | 控制压枪、连狙点压、呼吸稳定、闪身喷等 |
+| 大地图测距 | F4 | 单击进入大地图测距，双击进入纯手动两点测距 |
+| 迫击炮自动瞄准 | 鼠标右键长按 | 上炮后长按触发自动调高和方向修正 |
+| 窗口显示开关 | Home | 显示或隐藏主窗口 |
+| 打开装备栏 | Tab | 必须与游戏内打开装备栏按键一致 |
+| 开火按键 | F8 | 必须与游戏内开火按键一致，游戏中不要设为鼠标左键 |
+| 腰射瞄准 | 鼠标右键长按 | 闪身喷和腰射倍率判断会使用 |
+| 打开小地图 | N | 程序自动打开/关闭游戏小地图时使用，也可手动切换特殊武器显示 |
+| 打开大地图 | M | 与游戏内大地图按键一致；按下时会取消地图点位/大地图测距 |
+| 加速跑 | Shift | 投掷物助跑跳投会使用 |
+| 投掷物 | B | 投掷物自动瞬爆相关按键 |
+| 标点前后切换 | 上 / 下 | 切换当前选中标点颜色 |
+
+按键可以在 `系统设置 > 按键设置` 中修改。程序内快捷键和游戏内同步按键是两类不同用途：前者只控制程序，后者必须和游戏设置保持一致。
+
+## 区域校准注意事项
+
+- `识别区域设置` 中每个按钮都有对应预览图，鼠标移动到按钮上可查看建议框选位置。
+- 小地图区域应选择小地图内边框，注意不要框到灰色轮廓条。
+- 大地图区域应框住完整大地图。
+- 1km 比例尺需要在大地图中框选 1km 标尺长度，用于大地图和纯手动测距换算。
+- 武器编号、配件区域应选择白边外侧，不要过大，也不要框到白边内侧。
+- 武器名区域比文字外缘略大即可，右侧可适当延伸。
+- 迫击炮上炮检测区域必须是正方形，框住上炮后出现的下炮提示区域。
+- 顶部方向区域用于迫击炮方向自动瞄准，应框住屏幕顶部方向条。
+
+`显示所有区域框` 可用于检查当前校准区域。Debug 模式下区域框可以被截图捕获，方便制作校准预览图。
+
+## 特殊武器与测距
+
+特殊武器助手依赖显示层开关、当前武器识别、小地图标点识别和当前选中标点颜色。常见逻辑如下：
+
+- 识别到火箭筒、投掷物、VSS、十字弩、C4 等特殊武器后，程序会自动按小地图按键打开小地图，并显示对应辅助。
+- 切回普通武器后，程序会关闭特殊武器显示，并按小地图按键关闭小地图。
+- 如果玩家手动按下小地图按键，可以抑制或恢复当前特殊武器显示。
+- 快速双击小地图按键时，游戏内小地图状态基本保持不变，程序显示层只切换一次，用于修正时序错乱。
+- 小地图或大地图未检测到当前颜色标点时，会显示对应提示。
+
+如果识别不到标点，优先检查：
+
+- 游戏色盲模式是否与程序一致。
+- 标点模板是否与当前分辨率、小地图大小匹配。
+- 小地图、大地图区域是否校准准确。
+- 当前选中标点颜色是否正确。
+- 标点是否被窗口、显示层或游戏 UI 遮挡。
+
+## 迫击炮助手
+
+迫击炮不是显示层开启后立即生效，而是需要识别到上炮状态：
+
+1. 显示层总开关开启。
+2. 迫击炮助手开关开启。
+3. 玩家按下 F 进行上炮。
+4. 程序在迫击炮上炮检测区域中识别到提示后，切换为迫击炮状态。
+5. 自动打开小地图，并显示迫击炮测距和参数。
+
+下炮、识别到其他武器、或连续检测不到上炮区域后，会退出迫击炮状态并关闭对应显示。按下 ESC、打开大地图、打开装备栏等会遮挡上炮识别的操作时，程序会暂时保持迫击炮状态，避免在菜单或地图界面中误判下炮。
+
+迫击炮自动瞄准默认由鼠标右键长按触发，只在上炮状态下生效。自动瞄准包括：
+
+- 根据距离自动调节迫击炮射程档位。
+- 根据顶部方向区域中当前颜色标点的位置，左右移动鼠标进行方向修正。
+- PID 参数可在 `特殊武器参数设置 > 迫击炮` 中调整。
+
+## 投掷物助手
+
+投掷物目前分为三段：
+
+- 20-50 米：正常抛投。
+- 50-65 米左右：跳投。
+- 65-90 米左右：助跑跳投。
+
+开启自动瞬爆后，程序会根据距离和配置曲线计算抬高位置、瞬爆时间以及跳投/助跑跳投时机。助跑跳投会用到开火键、投掷物键、跳跃、W 和加速跑按键，因此这些游戏内同步按键必须设置正确。
+
+如果发现投掷物没有跳投或助跑异常，优先检查：
+
+- 开火按键是否与游戏一致。
+- 投掷物按键是否与游戏一致。
+- 加速跑按键是否与游戏一致。
+- 跳投延迟、助跑时间、瞬爆曲线是否在特殊武器参数窗口中设置合理。
+
+## 压枪与姿势识别
+
+压枪依赖当前武器、配件、倍镜、姿势识别和游戏内灵敏度。使用前请确认：
+
+- 游戏灵敏度保持默认。
+- 开火按键不要使用鼠标左键。
+- 装备栏按键与游戏一致。
+- 武器编号、武器名、配件、姿势区域均已正确校准。
+- 武器图标和模板缩放已校准。
+
+如果两个武器识别为同一把且当前手持也是该武器，程序会优先使用武器 2 的配置。这样可以在两把相同武器或识别冲突时更稳定地读取配件与倍镜。
+
+SG 自动闪身喷只在识别到霰弹枪类型、压枪开启、且通过 Q/E 记录了探头方向时触发。未识别到 SG 时，左下角状态栏不会显示探头方向。
+
+## 狙击枪呼吸晃动稳定
+
+SR 呼吸晃动稳定需要正确校准对应倍镜的镜内上边缘区域。移动时会暂时屏蔽呼吸晃动稳定，松开 WASD 后恢复。若准星边缘两帧差距过大，也会跳过本次调整，避免人物移动时画面抖动。
+
+## 分辨率与显示器配置
+
+程序会按游戏显示器分辨率加载对应区域配置，区域配置保存在：
+
+```text
+config/regions/<宽>_<高>.json
+```
+
+例如：
+
+```text
+config/regions/1920_1080.json
+config/regions/2560_1600.json
+```
+
+第一次运行或显示器配置变化时，程序会让你选择游戏使用的显示器。每个分辨率都应单独校准区域框和缩放参数。为了避免 1920x1080 被系统偶发报告成 1921x1080，程序会优先贴近已有的相邻分辨率配置。
+
+## README.pdf
+
+程序内“查看完整使用说明文档”会读取 exe 同目录下的 `README.pdf`，不会自动生成 PDF。
+
+- Debug 运行时，可将 `README.pdf` 放到 `.build/debug/README.pdf`。
+- Release 打包时，如项目根目录存在 `README.pdf`，构建会自动复制到 `.build/package/release/README.pdf`。
+- 如果 exe 同目录没有 `README.pdf`，程序会提示文件缺失。
+
+## 常见问题
+
+### 点击运行后没有重新编译
+
+Visual Studio 顶部的绿色运行按钮有时只是运行已生成的 exe。建议使用 CMake 目标的生成按钮，或通过 `生成 > 全部生成`，并确认当前 preset 是 `windows-x64-debug` 或 `windows-x64-release`。
+
+### Build Insights 报错
+
+`生成 > 运行 Build Insights` 不是普通编译入口。它需要系统跟踪权限，可能要求管理员权限或停止 `NT Kernel Logger`。普通编译不需要使用 Build Insights。
+
+### 换电脑后缺少 VCRUNTIME140D.dll 或 ucrtbased.dll
+
+这是 Debug 版本依赖调试运行库导致的。请编译 Release，并分发 `.build/package/release` 中的文件。
+
+### 显示层影响识别或截图
+
+多数显示层已设置为只显示、不被截图捕获。Debug 区域框为了制作校准图可以被截图捕获。如果识别异常，先确认是否开启了调试区域框或其他覆盖窗口。
+
+### 识别到了特殊武器但没有显示
+
+检查这些开关：
+
+- 测距瞄准显示开关是否开启。
+- 对应特殊武器助手是否开启。
+- 是否手动按 N 抑制过显示。
+- 小地图按键是否与游戏一致。
+- 当前颜色标点是否能被小地图或大地图识别。
+
+### 关闭程序时出现异常
+
+如果在 Visual Studio 中弹出 Debug Assertion，请点击“重试”，打开调用堆栈并截图。调用堆栈比弹窗本身更能定位是哪个窗口、线程或显示层关闭顺序出了问题。
+
+## 运行风险提示
+
+本程序包含屏幕识别、全局热键、显示层和键鼠模拟。请确保只在你允许使用的环境中运行，并自行承担与游戏规则、平台规则、系统权限和输入模拟相关的风险。

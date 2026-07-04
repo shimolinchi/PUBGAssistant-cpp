@@ -1,5 +1,7 @@
 #include "TemplateMatcher.hpp"
 
+#include <algorithm>
+#include <cmath>
 #include <iostream>
 
 namespace pubg {
@@ -113,9 +115,10 @@ std::unordered_map<std::string, std::vector<MaskedTemplate>> TemplateMatcher::lo
     return out;
 }
 
-std::vector<cv::Mat> TemplateMatcher::loadAlphaBinaryTemplates(const std::filesystem::path& dir) {
+namespace {
+std::vector<cv::Mat> loadAlphaBinaryTemplatesImpl(const std::filesystem::path& dir, double scale) {
     std::vector<cv::Mat> out;
-    auto loadFrom = [&out](const std::filesystem::path& path) {
+    auto loadFrom = [&out, scale](const std::filesystem::path& path) {
         if (!std::filesystem::exists(path)) {
             return;
         }
@@ -131,11 +134,27 @@ std::vector<cv::Mat> TemplateMatcher::loadAlphaBinaryTemplates(const std::filesy
             cv::split(img, channels);
             cv::Mat binary;
             cv::threshold(channels[3], binary, 128, 255, cv::THRESH_BINARY);
+            if (std::isfinite(scale) && std::abs(scale - 1.0) > 0.01) {
+                const int width = std::max(1, static_cast<int>(std::lround(binary.cols * scale)));
+                const int height = std::max(1, static_cast<int>(std::lround(binary.rows * scale)));
+                cv::resize(binary, binary, cv::Size(width, height), 0.0, 0.0, cv::INTER_NEAREST);
+                cv::threshold(binary, binary, 128, 255, cv::THRESH_BINARY);
+            }
             out.push_back(binary);
         }
     };
     loadFrom(dir);
     return out;
+}
+} // namespace
+
+std::vector<cv::Mat> TemplateMatcher::loadAlphaBinaryTemplates(const std::filesystem::path& dir) {
+    return loadAlphaBinaryTemplatesImpl(dir, 1.0);
+}
+
+std::vector<cv::Mat> TemplateMatcher::loadScaledAlphaBinaryTemplates(const std::filesystem::path& dir, double scale) {
+    scale = std::clamp(scale, 0.35, 3.0);
+    return loadAlphaBinaryTemplatesImpl(dir, scale);
 }
 
 std::pair<std::string, double> TemplateMatcher::matchGray(

@@ -42,42 +42,75 @@ std::pair<double, double> paddedYRange(const std::vector<double>& ys, const std:
     return {min_y - span * 0.1, max_y + span * 0.1};
 }
 
-std::pair<double, double> throwableXRange(bool jump) {
-    return jump ? std::pair<double, double>{50.0, 70.0} : std::pair<double, double>{20.0, 50.0};
+std::pair<double, double> throwableXRange(const Config& config, int mode_index) {
+    const auto cfg = config.read([](const Json& data) {
+        return data.value("throwables_config", Json::object());
+    });
+    if (mode_index == 2) {
+        return {cfg.value("run_jump_min_dist", 65.0), cfg.value("run_jump_max_dist", 90.0)};
+    }
+    if (mode_index == 1) {
+        return {cfg.value("jump_min_dist", 50.0), cfg.value("jump_max_dist", 65.0)};
+    }
+    return {cfg.value("normal_min_dist", 20.0), cfg.value("normal_max_dist", 50.0)};
 }
 
 } // namespace
 
 SpecialWeaponDebuggerWindow::SpecialWeaponDebuggerWindow(Config& config, QWidget* parent)
     : QWidget(parent), config_(config) {
-    setWindowTitle(QStringLiteral("特殊武器参数调试"));
+    setWindowTitle(QStringLiteral("特殊武器参数设置"));
     resize(720, 480);
     applyThemedPopupWindow(this, config_);
     buildUi();
     renderCurrentWeapon();
 }
 
+SpecialWeaponDebuggerWindow::~SpecialWeaponDebuggerWindow() {
+    cleanupBeforeClose();
+}
+
+void SpecialWeaponDebuggerWindow::closeEvent(QCloseEvent* event) {
+    hide();
+    event->ignore();
+}
+
+void SpecialWeaponDebuggerWindow::cleanupBeforeClose() {
+    if (curve_editor_) {
+        curve_editor_->setCurves({});
+        curve_editor_->clearSelection();
+        curve_editor_->clearUndoHistory();
+    }
+    param_edits_.clear();
+    active_x_.clear();
+    active_y_.clear();
+    active_y2_.clear();
+}
+
 void SpecialWeaponDebuggerWindow::buildUi() {
     auto* root = new QHBoxLayout(this);
     root->setContentsMargins(14, 14, 14, 14);
     root->setSpacing(12);
+
     auto* left = new QWidget(this);
     left->setFixedWidth(196);
     auto* ll = new QVBoxLayout(left);
     ll->setContentsMargins(0, 0, 0, 0);
     ll->setSpacing(8);
 
-    auto* title = new QLabel(QStringLiteral("特殊武器"), this);
     const auto theme = currentUiTheme(config_);
+    auto* title = new QLabel(QStringLiteral("特殊武器"), this);
     title->setStyleSheet(QStringLiteral("font-size:17px;font-weight:700;color:%1;").arg(theme.button_text));
     ll->addWidget(title);
 
     weapon_combo_ = new QComboBox(this);
-    weapon_combo_->addItems({QStringLiteral("火箭筒"), "VSS", QStringLiteral("十字弩"), QStringLiteral("迫击炮"), QStringLiteral("投掷物"), "C4"});
+    weapon_combo_->addItems({QStringLiteral("火箭筒"), "VSS", QStringLiteral("十字弩"),
+                             QStringLiteral("迫击炮"), QStringLiteral("投掷物"), "C4"});
     ll->addWidget(weapon_combo_);
 
     throw_mode_combo_ = new QComboBox(this);
-    throw_mode_combo_->addItems({QStringLiteral("普通投掷"), QStringLiteral("跳投")});
+    throw_mode_combo_->addItems({QStringLiteral("普通投掷"), QStringLiteral("跳投"),
+                                 QStringLiteral("助跑跳投"), QStringLiteral("助跑参数")});
     ll->addWidget(throw_mode_combo_);
 
     auto* button_grid = new QGridLayout();
@@ -103,7 +136,14 @@ void SpecialWeaponDebuggerWindow::buildUi() {
     ll->addWidget(status_label_);
     ll->addStretch();
 
-    auto* hint = new QLabel(QStringLiteral("操作提示\n- 拖拽控制点：修改数值\n- Ctrl + 点击：多选控制点\n- Ctrl + Z：撤回上一次拖动\n- 按住 X/Y：锁定对应轴\n- 左键双击空白：新增控制点\n- 右键双击控制点：删除"), this);
+    auto* hint = new QLabel(QStringLiteral(
+        "操作提示\n"
+        "- 拖拽控制点：修改数值\n"
+        "- Ctrl + 点击：多选控制点\n"
+        "- Ctrl + Z：撤回上一次拖动\n"
+        "- 按住 X/Y：锁定对应轴\n"
+        "- 左键双击空白：新增控制点\n"
+        "- 右键双击控制点：删除"), this);
     hint->setWordWrap(true);
     hint->setStyleSheet(QStringLiteral("color:%1;font-size:12px;%2padding:8px;").arg(theme.button_text, themedPanelStyle(theme)));
     ll->addWidget(hint);
@@ -135,33 +175,47 @@ void SpecialWeaponDebuggerWindow::renderCurrentWeapon() {
     active_y2_.clear();
     ys2_.clear();
     if (right_panel_ != curve_editor_) {
+        QWidget* old_panel = right_panel_;
         layout()->replaceWidget(right_panel_, curve_editor_);
-        right_panel_->deleteLater();
         right_panel_ = curve_editor_;
+        if (old_panel) {
+            old_panel->hide();
+            old_panel->setParent(nullptr);
+            delete old_panel;
+        }
     }
     curve_editor_->show();
     throw_mode_combo_->setVisible(w == QStringLiteral("投掷物"));
-    if (w == QStringLiteral("火箭筒")) bindCurve("rocket_config", "calib_dists", "calib_ratios", QColor("#2563EB"), QStringLiteral("下坠比例"));
-    else if (w == "VSS") bindCurve("vss_config", "calib_dists", "calib_drops_ratio", QColor("#16A34A"), QStringLiteral("下坠比例"));
-    else if (w == QStringLiteral("十字弩")) bindCurve("crossbow_config", "calib_dists", "calib_drops_ratio", QColor("#EA580C"), QStringLiteral("下坠比例"));
-    else if (w == QStringLiteral("投掷物")) bindThrowables(throw_mode_combo_->currentText() == QStringLiteral("跳投"));
-    else if (w == QStringLiteral("迫击炮")) bindParams("mortar_config", {
-        {"a_param", QStringLiteral("上坠修正 a"), 0.2},
-        {"b_param", QStringLiteral("下坠修正 b"), 0.2},
-        {"direction_auto_aim_kp", QStringLiteral("方向 PID - Kp"), 0.045},
-        {"direction_auto_aim_ki", QStringLiteral("方向 PID - Ki"), 0.0},
-        {"direction_auto_aim_kd", QStringLiteral("方向 PID - Kd"), 0.012},
-        {"direction_auto_aim_step_delay_ms", QStringLiteral("方向 PID - 间隔 ms"), 2.0},
-        {"direction_auto_aim_max_step_px", QStringLiteral("方向 PID - 单步上限 px"), 80.0},
-    });
-    else if (w == "C4") bindParams("c4_config", {
-        {"target_speed", QStringLiteral("推荐起步速度 km/h"), 60.0},
-        {"jump_distance_threshold", QStringLiteral("推荐跳车距离 m"), 20.0},
-    });
+
+    if (w == QStringLiteral("火箭筒")) {
+        bindCurve("rocket_config", "calib_dists", "calib_ratios", QColor("#2563EB"), QStringLiteral("下坠比例"));
+    } else if (w == "VSS") {
+        bindCurve("vss_config", "calib_dists", "calib_drops_ratio", QColor("#16A34A"), QStringLiteral("下坠比例"));
+    } else if (w == QStringLiteral("十字弩")) {
+        bindCurve("crossbow_config", "calib_dists", "calib_drops_ratio", QColor("#EA580C"), QStringLiteral("下坠比例"));
+    } else if (w == QStringLiteral("投掷物")) {
+        bindThrowables(throw_mode_combo_->currentIndex());
+    } else if (w == QStringLiteral("迫击炮")) {
+        bindParams("mortar_config", {
+            {"a_param", QStringLiteral("上坡修正 a"), 0.2},
+            {"b_param", QStringLiteral("下坡修正 b"), 0.2},
+            {"direction_auto_aim_kp", QStringLiteral("方向 PID - Kp"), 0.045},
+            {"direction_auto_aim_ki", QStringLiteral("方向 PID - Ki"), 0.0},
+            {"direction_auto_aim_kd", QStringLiteral("方向 PID - Kd"), 0.012},
+            {"direction_auto_aim_step_delay_ms", QStringLiteral("方向 PID - 间隔 ms"), 2.0},
+            {"direction_auto_aim_max_step_px", QStringLiteral("方向 PID - 单步上限 px"), 80.0},
+        });
+    } else if (w == "C4") {
+        bindParams("c4_config", {
+            {"target_speed", QStringLiteral("推荐起步速度 km/h"), 60.0},
+            {"jump_distance_threshold", QStringLiteral("推荐跳车距离 m"), 20.0},
+        });
+    }
     status_label_->setText(QStringLiteral("当前：") + w);
 }
 
-void SpecialWeaponDebuggerWindow::bindCurve(const std::string& config_key, const std::string& x_key, const std::string& y_key, const QColor& color, const QString& label) {
+void SpecialWeaponDebuggerWindow::bindCurve(const std::string& config_key, const std::string& x_key,
+                                            const std::string& y_key, const QColor& color, const QString& label) {
     active_config_ = config_key;
     active_x_ = x_key;
     active_y_ = y_key;
@@ -184,21 +238,35 @@ void SpecialWeaponDebuggerWindow::bindCurve(const std::string& config_key, const
     curve_editor_->setCurves({CurveEditor::Curve{label, color, &xs_, &ys_}});
 }
 
-void SpecialWeaponDebuggerWindow::bindThrowables(bool jump) {
+void SpecialWeaponDebuggerWindow::bindThrowables(int mode_index) {
     active_config_ = "throwables_config";
-    active_x_ = jump ? "jump_calib_dists" : "calib_dists";
-    active_y_ = jump ? "jump_calib_elevations_ratio" : "calib_elevations_ratio";
-    active_y2_ = jump ? "jump_calib_times" : "calib_times";
+    if (mode_index == 3) {
+        bindParams("throwables_config", {
+            {"normal_min_dist", QStringLiteral("普通投掷最小距离 m"), 20.0},
+            {"normal_max_dist", QStringLiteral("普通投掷最大距离 m"), 50.0},
+            {"jump_min_dist", QStringLiteral("跳投最小距离 m"), 50.0},
+            {"jump_max_dist", QStringLiteral("跳投最大距离 m"), 65.0},
+            {"run_jump_min_dist", QStringLiteral("助跑跳投最小距离 m"), 65.0},
+            {"run_jump_max_dist", QStringLiteral("助跑跳投最大距离 m"), 90.0},
+            {"run_jump_run_seconds", QStringLiteral("助跑时间 s"), 2.0},
+            {"jump_delay_after_release", QStringLiteral("松左键后跳跃延迟 s"), 0.3},
+        });
+        return;
+    }
+    active_x_ = mode_index == 2 ? "run_jump_calib_dists" : mode_index == 1 ? "jump_calib_dists" : "calib_dists";
+    active_y_ = mode_index == 2 ? "run_jump_calib_elevations_ratio" : mode_index == 1 ? "jump_calib_elevations_ratio" : "calib_elevations_ratio";
+    active_y2_ = mode_index == 2 ? "run_jump_calib_times" : mode_index == 1 ? "jump_calib_times" : "calib_times";
     xs_.clear();
     ys_.clear();
     ys2_.clear();
+
     const auto cfg = config_.read([&](const Json& data) {
         return data.value(active_config_, Json::object());
     });
     if (cfg.contains(active_x_)) for (const auto& v : cfg[active_x_]) xs_.push_back(v.get<double>());
     if (cfg.contains(active_y_)) for (const auto& v : cfg[active_y_]) ys_.push_back(v.get<double>());
     if (cfg.contains(active_y2_)) for (const auto& v : cfg[active_y2_]) ys2_.push_back(v.get<double>());
-    const auto [min_x, max_x] = throwableXRange(jump);
+    const auto [min_x, max_x] = throwableXRange(config_, mode_index);
     const auto [min_y, max_y] = paddedYRange(ys_);
     const auto [right_min_y, right_max_y] = paddedYRange(ys2_);
     curve_editor_->setAxisLabels(QStringLiteral("准星抬高高度"), QStringLiteral("瞬爆时间"));
@@ -217,6 +285,13 @@ void SpecialWeaponDebuggerWindow::bindParams(const std::string& config_key, cons
     active_config_ = config_key;
     active_x_.clear();
     active_y_.clear();
+    active_y2_.clear();
+    ys2_.clear();
+    if (curve_editor_) {
+        curve_editor_->setCurves({});
+        curve_editor_->clearSelection();
+        curve_editor_->clearUndoHistory();
+    }
     auto* panel = new QWidget(this);
     panel->setStyleSheet(themedWidgetStyle(currentUiTheme(config_)));
     auto* form = new QFormLayout(panel);
@@ -229,15 +304,22 @@ void SpecialWeaponDebuggerWindow::bindParams(const std::string& config_key, cons
         param_edits_[field.key] = edit;
         form->addRow(field.label, edit);
     }
+    QWidget* old_panel = right_panel_;
     layout()->replaceWidget(right_panel_, panel);
-    right_panel_->hide();
     right_panel_ = panel;
+    if (old_panel && old_panel != curve_editor_) {
+        old_panel->hide();
+        old_panel->setParent(nullptr);
+        delete old_panel;
+    } else if (old_panel) {
+        old_panel->hide();
+    }
 }
 
 void SpecialWeaponDebuggerWindow::addPoint() {
     if (right_panel_ != curve_editor_) return;
     const bool is_throwable = !active_y2_.empty();
-    const auto [throw_min_x, throw_max_x] = throwableXRange(throw_mode_combo_->currentText() == QStringLiteral("跳投"));
+    const auto [throw_min_x, throw_max_x] = throwableXRange(config_, throw_mode_combo_->currentIndex());
     if (xs_.empty()) {
         xs_.push_back(is_throwable ? throw_min_x : 50.0);
         ys_.push_back(0.5);

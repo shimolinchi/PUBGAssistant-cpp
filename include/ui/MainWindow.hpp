@@ -53,7 +53,7 @@ public:
         std::function<void()> sync_marker_colors;
         std::function<void()> refresh_status_hud;
         std::function<void()> reload_hotkeys;
-        std::function<void()> shutdown;
+        std::function<void()> prepare_for_close;
     };
 
     MainWindow(Config& config,

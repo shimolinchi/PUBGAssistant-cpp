@@ -58,24 +58,28 @@ double Ballistics::crossbowDropRatio(double distance) const {
     return Interpolator::sample(vec(c, "calib_dists"), vec(c, "calib_drops_ratio"), distance, 0.0);
 }
 
-double Ballistics::throwableElevationRatio(double distance, bool jump_throw) const {
+double Ballistics::throwableElevationRatio(double distance, int throw_mode) const {
     const auto c = config_.read([](const Json& root) {
         return root.value("throwables_config", Json::object());
     });
+    const char* x_key = throw_mode == 2 ? "run_jump_calib_dists" : throw_mode == 1 ? "jump_calib_dists" : "calib_dists";
+    const char* y_key = throw_mode == 2 ? "run_jump_calib_elevations_ratio" : throw_mode == 1 ? "jump_calib_elevations_ratio" : "calib_elevations_ratio";
     return Interpolator::sample(
-        vec(c, jump_throw ? "jump_calib_dists" : "calib_dists"),
-        vec(c, jump_throw ? "jump_calib_elevations_ratio" : "calib_elevations_ratio"),
+        vec(c, x_key),
+        vec(c, y_key),
         distance,
         0.0);
 }
 
-double Ballistics::throwableCookTime(double distance, bool jump_throw) const {
+double Ballistics::throwableCookTime(double distance, int throw_mode) const {
     const auto c = config_.read([](const Json& root) {
         return root.value("throwables_config", Json::object());
     });
+    const char* x_key = throw_mode == 2 ? "run_jump_calib_dists" : throw_mode == 1 ? "jump_calib_dists" : "calib_dists";
+    const char* y_key = throw_mode == 2 ? "run_jump_calib_times" : throw_mode == 1 ? "jump_calib_times" : "calib_times";
     return Interpolator::sample(
-        vec(c, jump_throw ? "jump_calib_dists" : "calib_dists"),
-        vec(c, jump_throw ? "jump_calib_times" : "calib_times"),
+        vec(c, x_key),
+        vec(c, y_key),
         distance,
         0.0);
 }

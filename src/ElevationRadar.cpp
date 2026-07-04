@@ -81,7 +81,11 @@ ElevationRadar::Match ElevationRadar::matchMarkerInMask(const cv::Mat& mask) con
             cv::minMaxLoc(res, nullptr, &max_val, nullptr, &max_loc);
             if (std::isfinite(max_val) && max_val >= 0.55 && max_val > best.score) {
                 best.score = max_val;
-                best.y = y1 + max_loc.y + tpl.rows;
+                best.left = x1 + max_loc.x;
+                best.top = y1 + max_loc.y;
+                best.right = best.left + tpl.cols;
+                best.bottom = best.top + tpl.rows;
+                best.y = best.bottom;
             }
         }
     }
@@ -121,12 +125,14 @@ void ElevationRadar::run() {
                 const double ratio = best_y / std::max(1, rect->height);
                 next[c.name] = ratio;
                 if (display_) {
-                    const double ax = rect->left + rect->width / 2.0;
-                    const double ay = rect->top + best_y;
+                    constexpr double padding = 2.0;
+                    const double x1 = rect->left + match.left - padding;
+                    const double y1 = rect->top + match.top - padding;
+                    const double x2 = rect->left + match.right + padding;
+                    const double y2 = rect->top + match.bottom + padding;
                     const auto color = hexToBgr(c.hex);
-                    cmds.push_back({OverlayCommand::Type::Circle, ax, ay, 0, 0, 2.0, "", color, 1});
-                    cmds.push_back({OverlayCommand::Type::Line, ax - 8.0, ay + 8.0, ax - 16.0, ay + 16.0, 0, "", color, 1});
-                    cmds.push_back({OverlayCommand::Type::Line, ax + 8.0, ay + 8.0, ax + 16.0, ay + 16.0, 0, "", color, 1});
+                    cmds.push_back({OverlayCommand::Type::Rect, x1, y1, x2, y2, 0, "", color, 0, 18, 70});
+                    cmds.push_back({OverlayCommand::Type::Rect, x1, y1, x2, y2, 0, "", color, 2, 18, 220});
                 }
             } else {
                 next[c.name] = 0.0;

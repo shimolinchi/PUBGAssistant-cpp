@@ -6,6 +6,7 @@
 #include <cctype>
 #include <iostream>
 #include <tuple>
+#include <vector>
 #include <QApplication>
 #include <QDialog>
 #include <QGuiApplication>
@@ -16,6 +17,10 @@
 #include <QVBoxLayout>
 
 #include "ui/Theme.hpp"
+
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 #if defined(_WIN32) && defined(_DEBUG)
 #include <crtdbg.h>
@@ -67,13 +72,81 @@ bool sameScreenSnapshot(const Json& a, const Json& b) {
     return a.dump() == b.dump();
 }
 
+std::vector<std::pair<int, int>> existingRegionProfiles(const ResourcePaths& paths) {
+    std::vector<std::pair<int, int>> profiles;
+    std::error_code ec;
+    const auto dir = paths.regionConfigDir();
+    if (!std::filesystem::exists(dir, ec)) {
+        return profiles;
+    }
+
+    for (const auto& entry : std::filesystem::directory_iterator(dir, ec)) {
+        if (ec || !entry.is_regular_file()) {
+            continue;
+        }
+        const std::string filename = entry.path().filename().string();
+        const auto underscore = filename.find('_');
+        const auto dot = filename.rfind(".json");
+        if (underscore == std::string::npos || dot == std::string::npos || underscore >= dot) {
+            continue;
+        }
+        try {
+            const int profile_w = std::stoi(filename.substr(0, underscore));
+            const int profile_h = std::stoi(filename.substr(underscore + 1, dot - underscore - 1));
+            if (profile_w > 0 && profile_h > 0) {
+                profiles.emplace_back(profile_w, profile_h);
+            }
+        } catch (...) {
+        }
+    }
+    return profiles;
+}
+
+std::pair<int, int> snapToExistingRegionProfile(int width, int height, const ResourcePaths& paths) {
+    const auto profiles = existingRegionProfiles(paths);
+    if (profiles.empty()) {
+        return {width, height};
+    }
+
+    auto hasProfile = [&](int w, int h) {
+        return std::find(profiles.begin(), profiles.end(), std::make_pair(w, h)) != profiles.end();
+    };
+
+    // Qt/DPI occasionally reports 1921x1080 for a physical 1920x1080 monitor.
+    // Prefer the adjacent even profile so a stale 1921_1080.json cannot hijack loading.
+    if ((width % 2) != 0 && hasProfile(width - 1, height)) {
+        return {width - 1, height};
+    }
+    if ((height % 2) != 0 && hasProfile(width, height - 1)) {
+        return {width, height - 1};
+    }
+    if (hasProfile(width, height)) {
+        return {width, height};
+    }
+
+    std::pair<int, int> best{width, height};
+    int best_distance = 3;
+    for (const auto& profile : profiles) {
+        const int distance = std::abs(profile.first - width) + std::abs(profile.second - height);
+        if (std::abs(profile.first - width) <= 1 && std::abs(profile.second - height) <= 1 &&
+            distance < best_distance) {
+            best = profile;
+            best_distance = distance;
+        }
+    }
+    if (best_distance <= 2) {
+        return best;
+    }
+    return {width, height};
+}
+
 RegionManager::DisplayInfo displayInfoFromScreen(QScreen* screen) {
     if (!screen) {
         return {};
     }
     const QRect g = screen->geometry();
     const double dpr = screen->devicePixelRatio();
-    return RegionManager::DisplayInfo{
+    RegionManager::DisplayInfo display{
         static_cast<int>(std::lround(g.left() * dpr)),
         static_cast<int>(std::lround(g.top() * dpr)),
         std::max(1, static_cast<int>(std::lround(g.width() * dpr))),
@@ -85,6 +158,23 @@ RegionManager::DisplayInfo displayInfoFromScreen(QScreen* screen) {
         dpr,
         screen->name().toStdString(),
     };
+
+#ifdef _WIN32
+    const std::wstring device_name = screen->name().toStdWString();
+    DEVMODEW mode{};
+    mode.dmSize = sizeof(mode);
+    if (!device_name.empty() && EnumDisplaySettingsW(device_name.c_str(), ENUM_CURRENT_SETTINGS, &mode)) {
+        display.left = mode.dmPosition.x;
+        display.top = mode.dmPosition.y;
+        display.width = std::max(1, static_cast<int>(mode.dmPelsWidth));
+        display.height = std::max(1, static_cast<int>(mode.dmPelsHeight));
+        if (g.width() > 0) {
+            display.device_pixel_ratio = static_cast<double>(display.width) / static_cast<double>(g.width());
+        }
+    }
+#endif
+
+    return display;
 }
 
 } // namespace
@@ -132,6 +222,9 @@ App::App()
     mortar_mount_detector_ = std::make_unique<MortarMountDetector>(config_, *regions_);
     PUBG_HEAP_PROBE("ctor.afterMortarMountDetector");
     throwables_ = std::make_unique<ThrowablesAssistant>(config_, *regions_, *minimap_);
+    throwables_->setPhysicalKeyQuery([this](int vk) {
+        return hotkeys_.physicalKeyDown(vk);
+    });
     PUBG_HEAP_PROBE("ctor.afterThrowables");
     c4_ = std::make_unique<C4Assistant>(config_, *regions_, *minimap_);
     PUBG_HEAP_PROBE("ctor.afterC4");
@@ -150,18 +243,22 @@ App::App()
 
 void App::wireCallbacks() {
     weapon_detector_->setEnabled(false, [this](const std::string& weapon, double score) {
+        if (shutting_down_) return;
         c4_->onWeaponDetected(weapon, score);
         updateWeaponFromDetectors(weapon, score);
     });
     equipment_detector_->setEnabled(false, [this](const std::map<int, WeaponSlotInfo>& equipment_slots) {
+        if (shutting_down_) return;
         updateEquipment(equipment_slots);
     });
     equipment_detector_->setStatusCallback([this](const std::string& status) {
+        if (shutting_down_) return;
         if (status_hud_) {
             status_hud_->setEquipmentStatus(status);
         }
     });
     gesture_identifier_->setEnabled(false, [this](const std::string& stance, double) {
+        if (shutting_down_) return;
         {
             std::lock_guard lock(state_mutex_);
             current_stance_ = stance;
@@ -190,7 +287,7 @@ void App::registerHotkeys() {
     hotkeys_.addHotkey("toggle_recoil", hotkeyCombo("toggle_recoil", "<f3>"), [this] { toggleRecoil(); });
 #endif
     hotkeys_.addHotkey("measure_map", hotkeyCombo("measure_map", "<f4>"), [this] {
-        large_map_->toggleMode();
+        handleMeasureMapHotkey();
     });
     hotkeys_.addStateWatcher("mortar_auto_aim", hotkeyVk("mortar_auto_aim", "mouse_right"), [this](bool pressed) {
         if (!pressed) {
@@ -361,12 +458,13 @@ void App::reloadHotkeys() {
     }
 }
 
-void App::shutdown() {
+void App::stopRuntimeForShutdown() {
     {
         std::lock_guard lock(state_mutex_);
-        if (shutting_down_) {
+        if (runtime_stopped_) {
             return;
         }
+        runtime_stopped_ = true;
         shutting_down_ = true;
     }
     PUBG_HEAP_PROBE("shutdown.enter");
@@ -375,19 +473,43 @@ void App::shutdown() {
     joinMortarAutoAimHoldWorker();
     ++mortar_mount_session_;
     joinMortarMountWorker();
-    std::lock_guard control_lock(control_mutex_);
-    equipment_detector_->setEnabled(false);
-    weapon_detector_->setEnabled(false);
-    gesture_identifier_->setEnabled(false);
-    recoil_->setEnabled(false);
-    minimap_->setEnabled(false);
-    elevation_->setEnabled(false);
-    large_map_->setDisplay(false);
-    if (mortar_auto_aim_) mortar_auto_aim_->shutdown();
-    throwables_->setEnabled(false);
-    c4_->setEnabled(false);
-    special_->shutdown();
-    c4_->shutdown();
+    {
+        std::lock_guard control_lock(control_mutex_);
+        if (equipment_detector_) equipment_detector_->setEnabled(false);
+        if (weapon_detector_) weapon_detector_->setEnabled(false);
+        if (gesture_identifier_) gesture_identifier_->setEnabled(false);
+        if (recoil_) recoil_->shutdown();
+        if (minimap_) {
+            minimap_->setEnabled(false);
+            minimap_->setDisplay(false);
+        }
+        if (elevation_) {
+            elevation_->setEnabled(false);
+            elevation_->setDisplay(false);
+        }
+        if (large_map_) large_map_->setDisplay(false);
+        if (mortar_auto_aim_) mortar_auto_aim_->shutdown();
+        if (throwables_) throwables_->shutdown();
+        if (c4_) c4_->setEnabled(false);
+        if (special_) special_->shutdown();
+        if (c4_) c4_->shutdown();
+    }
+    PUBG_HEAP_PROBE("shutdown.afterStop");
+}
+
+void App::prepareForUiClose() {
+    stopRuntimeForShutdown();
+}
+
+void App::shutdown() {
+    stopRuntimeForShutdown();
+    {
+        std::lock_guard lock(state_mutex_);
+        if (resources_released_) {
+            return;
+        }
+        resources_released_ = true;
+    }
 
     status_hud_.reset();
     c4_.reset();
@@ -456,6 +578,10 @@ void App::migrateLegacyDefaultHotkeys() {
     config_.write([&](Json& data) {
         if (!data.contains("hotkeys") || !data["hotkeys"].is_object()) {
             return;
+        }
+        if (!data["hotkeys"].contains("sprint_key") || !data["hotkeys"]["sprint_key"].is_string()) {
+            data["hotkeys"]["sprint_key"] = "shift";
+            changed = true;
         }
         for (const auto& [action, old_values, next] : migrations) {
             if (!data["hotkeys"].contains(action) || !data["hotkeys"][action].is_string()) {
@@ -692,7 +818,6 @@ void App::applyWeaponUpdate(const std::string& weapon, double score) {
     bool recoil_enabled = false;
     std::string previous_weapon;
     bool ignore_empty_special_jitter = false;
-    bool leaving_mortar_hold = false;
     {
         std::lock_guard lock(state_mutex_);
         previous_weapon = current_weapon_;
@@ -700,14 +825,9 @@ void App::applyWeaponUpdate(const std::string& weapon, double score) {
         ignore_empty_special_jitter = weapon.empty() && special_display_active_ &&
                                       shouldAutoUseMinimapForWeapon(previous_weapon);
         if (!ignore_empty_special_jitter) {
-            if (hold_mortar_until_reacquired_ && weapon.empty()) {
+            if (hold_mortar_until_reacquired_ && mortar_mounted_ && weapon != "Mortar") {
                 pending_weapon_update_.reset();
                 return;
-            }
-            if (hold_mortar_until_reacquired_ && weapon != "Mortar") {
-                hold_mortar_until_reacquired_ = false;
-                mortar_mounted_ = false;
-                leaving_mortar_hold = true;
             }
             current_weapon_ = weapon;
             recoil_enabled = recoil_enabled_;
@@ -718,10 +838,6 @@ void App::applyWeaponUpdate(const std::string& weapon, double score) {
         std::cout << "[weapon] ignore empty special jitter after " << previous_weapon
                   << " score=" << score << "\n";
         return;
-    }
-    if (leaving_mortar_hold) {
-        ++mortar_mount_session_;
-        joinMortarMountWorker();
     }
     if (isRecoilWeapon(weapon)) {
         recoil_->updateCurrentWeapon(weapon);
@@ -968,14 +1084,14 @@ void App::handleManualGameMinimapToggle(bool pressed) {
 }
 
 void App::handleEscapeKey(bool pressed) {
-    std::lock_guard lock(state_mutex_);
     if (pressed) {
-        game_menu_active_ = true;
-        game_menu_input_suppress_until_ = nowSeconds() + 2.0;
-        if (mortar_mounted_) {
-            hold_mortar_until_reacquired_ = true;
+        {
+            std::lock_guard lock(state_mutex_);
+            game_menu_active_ = true;
         }
+        holdMortarStateForBlockingUi();
     } else {
+        std::lock_guard lock(state_mutex_);
         game_menu_active_ = false;
         game_menu_input_suppress_until_ = nowSeconds() + 0.45;
     }
@@ -983,17 +1099,51 @@ void App::handleEscapeKey(bool pressed) {
 
 void App::holdMortarStateForBlockingUi() {
     std::lock_guard lock(state_mutex_);
-    if (!mortar_mounted_) {
+    if (!mortar_mounted_ && current_weapon_ != "Mortar") {
         return;
     }
+    mortar_mounted_ = true;
+    current_weapon_ = "Mortar";
+    current_weapon_icon_visible_ = true;
     hold_mortar_until_reacquired_ = true;
     game_menu_input_suppress_until_ = std::max(game_menu_input_suppress_until_, nowSeconds() + 2.0);
+}
+
+void App::handleMeasureMapHotkey() {
+    const bool display_enabled = [this] {
+        std::lock_guard lock(state_mutex_);
+        if (shutting_down_) {
+            return false;
+        }
+        return display_enabled_;
+    }();
+    if (!display_enabled) {
+        return;
+    }
+    holdMortarStateForBlockingUi();
+
+    const double now = nowSeconds();
+    bool double_click = false;
+    {
+        std::lock_guard lock(state_mutex_);
+        double_click = last_measure_map_hotkey_time_ > 0.0 && now - last_measure_map_hotkey_time_ <= 0.35;
+        last_measure_map_hotkey_time_ = double_click ? 0.0 : now;
+    }
+    large_map_->setDisplay(true);
+    if (double_click) {
+        large_map_->startManualMeasure();
+        return;
+    }
+    large_map_->toggleMode();
 }
 
 void App::setSpecialDisplayActive(bool active) {
     bool changed = false;
     {
         std::lock_guard lock(state_mutex_);
+        if (shutting_down_ && active) {
+            return;
+        }
         changed = special_display_active_ != active;
         special_display_active_ = active;
     }
@@ -1083,6 +1233,9 @@ void App::handleMortarInteractKey(bool pressed) {
     bool special_display_active = false;
     {
         std::lock_guard lock(state_mutex_);
+        if (shutting_down_) {
+            return;
+        }
         display_enabled = display_enabled_;
         mortar_allowed = assistant_enabled_["mortar"];
         mounted = mortar_mounted_;
@@ -1094,6 +1247,9 @@ void App::handleMortarInteractKey(bool pressed) {
     if (mounted) {
         {
             std::lock_guard lock(state_mutex_);
+            if (hold_mortar_until_reacquired_) {
+                return;
+            }
             hold_mortar_until_reacquired_ = false;
         }
         setMortarMounted(false);
@@ -1420,6 +1576,17 @@ RegionManager::DisplayInfo App::resolveGameDisplay() {
     }
     QScreen* selected_screen = screens.empty() ? QGuiApplication::primaryScreen() : screens[selected_index];
     RegionManager::DisplayInfo display = displayInfoFromScreen(selected_screen);
+    const auto [profile_width, profile_height] = snapToExistingRegionProfile(display.width, display.height, paths_);
+    if (profile_width != display.width || profile_height != display.height) {
+        std::cerr << "[display] snapped detected resolution " << display.width << "x" << display.height
+                  << " to region profile " << profile_width << "x" << profile_height << "\n";
+        display.width = profile_width;
+        display.height = profile_height;
+        if (display.device_pixel_ratio > 0.0) {
+            display.qt_width = std::max(1, static_cast<int>(std::lround(display.width / display.device_pixel_ratio)));
+            display.qt_height = std::max(1, static_cast<int>(std::lround(display.height / display.device_pixel_ratio)));
+        }
+    }
 
     config_.write([&](Json& data) {
         data["display_config"]["screens"] = current_snapshot;
@@ -1472,6 +1639,15 @@ int App::run() {
     setWeaponDetectionEnabled(initial_weapon_detection);
     setDisplayEnabled(initial_display);
     setRecoilEnabled(initial_recoil);
+    {
+        std::string current_weapon;
+        {
+            std::lock_guard lock(state_mutex_);
+            current_weapon = current_weapon_;
+        }
+        updateSpecialWeaponMinimapState("", current_weapon);
+        updateAssistantRouting();
+    }
     PUBG_HEAP_PROBE("run.afterEnableDetection");
     pubg::ui::MainWindow::ControlCallbacks callbacks;
     callbacks.set_weapon_detection = [this](bool enabled) { setWeaponDetectionEnabled(enabled); };
@@ -1481,7 +1657,7 @@ int App::run() {
     callbacks.sync_marker_colors = [this] { syncMarkerColorsFromConfig(); };
     callbacks.refresh_status_hud = [this] { updateStatusHud(); };
     callbacks.reload_hotkeys = [this] { reloadHotkeys(); };
-    callbacks.shutdown = [this] { shutdown(); };
+    callbacks.prepare_for_close = [this] { prepareForUiClose(); };
     int code = 0;
     {
         pubg::ui::MainWindow window(config_, *regions_, *minimap_, *elevation_, *weapon_detector_,

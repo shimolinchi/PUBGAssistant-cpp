@@ -29,6 +29,10 @@ public:
 private:
     struct Match {
         double y = -1.0;
+        double left = 0.0;
+        double top = 0.0;
+        double right = 0.0;
+        double bottom = 0.0;
         double score = 0.0;
     };
 

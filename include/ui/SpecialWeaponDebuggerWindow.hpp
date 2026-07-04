@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QComboBox>
+#include <QCloseEvent>
 #include <QLabel>
 #include <QLineEdit>
 #include <QWidget>
@@ -17,16 +18,21 @@ class SpecialWeaponDebuggerWindow : public QWidget {
     Q_OBJECT
 public:
     SpecialWeaponDebuggerWindow(Config& config, QWidget* parent = nullptr);
+    ~SpecialWeaponDebuggerWindow() override;
 
 signals:
     void saved();
 
+protected:
+    void closeEvent(QCloseEvent* event) override;
+
 private:
     void buildUi();
+    void cleanupBeforeClose();
     void renderCurrentWeapon();
     void saveAndApply();
     void bindCurve(const std::string& config_key, const std::string& x_key, const std::string& y_key, const QColor& color, const QString& label);
-    void bindThrowables(bool jump);
+    void bindThrowables(int mode_index);
     struct ParamField {
         std::string key;
         QString label;

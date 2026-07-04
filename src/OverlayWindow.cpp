@@ -59,9 +59,13 @@ OverlayWindow::~OverlayWindow() {
 
 void OverlayWindow::close() {
 #ifdef _WIN32
+    destroying_.store(true);
+    {
+        std::lock_guard lock(mutex_);
+        commands_.clear();
+    }
     HWND hwnd = hwnd_;
     if (hwnd) {
-        destroying_.store(true);
         if (isOwnerThread()) {
             DestroyWindow(hwnd);
         } else {
@@ -254,89 +258,92 @@ void OverlayWindow::renderLayered() {
         return;
     }
 
-    Gdiplus::Graphics graphics(mem_dc);
-    graphics.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
-    graphics.SetTextRenderingHint(Gdiplus::TextRenderingHintClearTypeGridFit);
-    graphics.Clear(Gdiplus::Color(0, 0, 0, 0));
+    {
+        Gdiplus::Graphics graphics(mem_dc);
+        graphics.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
+        graphics.SetTextRenderingHint(Gdiplus::TextRenderingHintClearTypeGridFit);
+        graphics.Clear(Gdiplus::Color(0, 0, 0, 0));
 
-    for (const auto& cmd : commands) {
-        if (cmd.type == OverlayCommand::Type::Clear) {
-            continue;
-        }
-        const auto color = gdipColor(cmd.bgr, cmd.alpha);
-        Gdiplus::Pen pen(color, static_cast<Gdiplus::REAL>(std::max(1, cmd.width)));
-        Gdiplus::SolidBrush brush(color);
-        switch (cmd.type) {
-        case OverlayCommand::Type::Line:
-            graphics.DrawLine(&pen,
-                              static_cast<Gdiplus::REAL>(cmd.x1), static_cast<Gdiplus::REAL>(cmd.y1),
-                              static_cast<Gdiplus::REAL>(cmd.x2), static_cast<Gdiplus::REAL>(cmd.y2));
-            break;
-        case OverlayCommand::Type::Rect:
-            if (cmd.width > 0) {
-                graphics.DrawRectangle(&pen,
-                                       static_cast<Gdiplus::REAL>(cmd.x1), static_cast<Gdiplus::REAL>(cmd.y1),
-                                       static_cast<Gdiplus::REAL>(cmd.x2 - cmd.x1), static_cast<Gdiplus::REAL>(cmd.y2 - cmd.y1));
-            } else {
-                graphics.FillRectangle(&brush,
-                                       static_cast<Gdiplus::REAL>(cmd.x1), static_cast<Gdiplus::REAL>(cmd.y1),
-                                       static_cast<Gdiplus::REAL>(cmd.x2 - cmd.x1), static_cast<Gdiplus::REAL>(cmd.y2 - cmd.y1));
+        for (const auto& cmd : commands) {
+            if (cmd.type == OverlayCommand::Type::Clear) {
+                continue;
             }
-            break;
-        case OverlayCommand::Type::RoundedRect: {
-            Gdiplus::GraphicsPath path;
-            addRoundedRectPath(path, static_cast<float>(cmd.x1), static_cast<float>(cmd.y1),
-                               static_cast<float>(cmd.x2), static_cast<float>(cmd.y2),
-                               static_cast<float>(cmd.radius));
-            if (cmd.width > 0) {
-                graphics.DrawPath(&pen, &path);
-            } else {
-                graphics.FillPath(&brush, &path);
-            }
-            break;
-        }
-        case OverlayCommand::Type::Circle:
-            if (cmd.width > 0) {
-                graphics.DrawEllipse(&pen,
-                                     static_cast<Gdiplus::REAL>(cmd.x1 - cmd.radius),
-                                     static_cast<Gdiplus::REAL>(cmd.y1 - cmd.radius),
-                                     static_cast<Gdiplus::REAL>(cmd.radius * 2.0),
-                                     static_cast<Gdiplus::REAL>(cmd.radius * 2.0));
-            } else {
-                graphics.FillEllipse(&brush,
-                                     static_cast<Gdiplus::REAL>(cmd.x1 - cmd.radius),
-                                     static_cast<Gdiplus::REAL>(cmd.y1 - cmd.radius),
-                                     static_cast<Gdiplus::REAL>(cmd.radius * 2.0),
-                                     static_cast<Gdiplus::REAL>(cmd.radius * 2.0));
-            }
-            break;
-        case OverlayCommand::Type::Text:
-        case OverlayCommand::Type::TextCenter: {
-            const auto wide = widen(cmd.text);
-            Gdiplus::FontFamily family(fontFamilyName());
-            const Gdiplus::FontFamily* font_family = family.IsAvailable()
-                ? &family
-                : Gdiplus::FontFamily::GenericSansSerif();
-            Gdiplus::Font font(font_family, static_cast<Gdiplus::REAL>(cmd.font_size), Gdiplus::FontStyleBold, Gdiplus::UnitPixel);
-            if (font.GetLastStatus() != Gdiplus::Ok) {
+            const auto color = gdipColor(cmd.bgr, cmd.alpha);
+            Gdiplus::Pen pen(color, static_cast<Gdiplus::REAL>(std::max(1, cmd.width)));
+            Gdiplus::SolidBrush brush(color);
+            switch (cmd.type) {
+            case OverlayCommand::Type::Line:
+                graphics.DrawLine(&pen,
+                                  static_cast<Gdiplus::REAL>(cmd.x1), static_cast<Gdiplus::REAL>(cmd.y1),
+                                  static_cast<Gdiplus::REAL>(cmd.x2), static_cast<Gdiplus::REAL>(cmd.y2));
+                break;
+            case OverlayCommand::Type::Rect:
+                if (cmd.width > 0) {
+                    graphics.DrawRectangle(&pen,
+                                           static_cast<Gdiplus::REAL>(cmd.x1), static_cast<Gdiplus::REAL>(cmd.y1),
+                                           static_cast<Gdiplus::REAL>(cmd.x2 - cmd.x1), static_cast<Gdiplus::REAL>(cmd.y2 - cmd.y1));
+                } else {
+                    graphics.FillRectangle(&brush,
+                                           static_cast<Gdiplus::REAL>(cmd.x1), static_cast<Gdiplus::REAL>(cmd.y1),
+                                           static_cast<Gdiplus::REAL>(cmd.x2 - cmd.x1), static_cast<Gdiplus::REAL>(cmd.y2 - cmd.y1));
+                }
+                break;
+            case OverlayCommand::Type::RoundedRect: {
+                Gdiplus::GraphicsPath path;
+                addRoundedRectPath(path, static_cast<float>(cmd.x1), static_cast<float>(cmd.y1),
+                                   static_cast<float>(cmd.x2), static_cast<float>(cmd.y2),
+                                   static_cast<float>(cmd.radius));
+                if (cmd.width > 0) {
+                    graphics.DrawPath(&pen, &path);
+                } else {
+                    graphics.FillPath(&brush, &path);
+                }
                 break;
             }
-            Gdiplus::StringFormat format;
-            if (cmd.type == OverlayCommand::Type::TextCenter) {
-                format.SetAlignment(Gdiplus::StringAlignmentCenter);
-                format.SetLineAlignment(Gdiplus::StringAlignmentCenter);
-                Gdiplus::RectF rect(static_cast<Gdiplus::REAL>(cmd.x1), static_cast<Gdiplus::REAL>(cmd.y1),
-                                    static_cast<Gdiplus::REAL>(cmd.x2 - cmd.x1), static_cast<Gdiplus::REAL>(cmd.y2 - cmd.y1));
-                graphics.DrawString(wide.c_str(), static_cast<INT>(wide.size()), &font, rect, &format, &brush);
-            } else {
-                Gdiplus::PointF point(static_cast<Gdiplus::REAL>(cmd.x1), static_cast<Gdiplus::REAL>(cmd.y1));
-                graphics.DrawString(wide.c_str(), static_cast<INT>(wide.size()), &font, point, &brush);
+            case OverlayCommand::Type::Circle:
+                if (cmd.width > 0) {
+                    graphics.DrawEllipse(&pen,
+                                         static_cast<Gdiplus::REAL>(cmd.x1 - cmd.radius),
+                                         static_cast<Gdiplus::REAL>(cmd.y1 - cmd.radius),
+                                         static_cast<Gdiplus::REAL>(cmd.radius * 2.0),
+                                         static_cast<Gdiplus::REAL>(cmd.radius * 2.0));
+                } else {
+                    graphics.FillEllipse(&brush,
+                                         static_cast<Gdiplus::REAL>(cmd.x1 - cmd.radius),
+                                         static_cast<Gdiplus::REAL>(cmd.y1 - cmd.radius),
+                                         static_cast<Gdiplus::REAL>(cmd.radius * 2.0),
+                                         static_cast<Gdiplus::REAL>(cmd.radius * 2.0));
+                }
+                break;
+            case OverlayCommand::Type::Text:
+            case OverlayCommand::Type::TextCenter: {
+                const auto wide = widen(cmd.text);
+                Gdiplus::FontFamily family(fontFamilyName());
+                const Gdiplus::FontFamily* font_family = family.IsAvailable()
+                    ? &family
+                    : Gdiplus::FontFamily::GenericSansSerif();
+                Gdiplus::Font font(font_family, static_cast<Gdiplus::REAL>(cmd.font_size), Gdiplus::FontStyleBold, Gdiplus::UnitPixel);
+                if (font.GetLastStatus() != Gdiplus::Ok) {
+                    break;
+                }
+                Gdiplus::StringFormat format;
+                if (cmd.type == OverlayCommand::Type::TextCenter) {
+                    format.SetAlignment(Gdiplus::StringAlignmentCenter);
+                    format.SetLineAlignment(Gdiplus::StringAlignmentCenter);
+                    Gdiplus::RectF rect(static_cast<Gdiplus::REAL>(cmd.x1), static_cast<Gdiplus::REAL>(cmd.y1),
+                                        static_cast<Gdiplus::REAL>(cmd.x2 - cmd.x1), static_cast<Gdiplus::REAL>(cmd.y2 - cmd.y1));
+                    graphics.DrawString(wide.c_str(), static_cast<INT>(wide.size()), &font, rect, &format, &brush);
+                } else {
+                    Gdiplus::PointF point(static_cast<Gdiplus::REAL>(cmd.x1), static_cast<Gdiplus::REAL>(cmd.y1));
+                    graphics.DrawString(wide.c_str(), static_cast<INT>(wide.size()), &font, point, &brush);
+                }
+                break;
             }
-            break;
+            case OverlayCommand::Type::Clear:
+                break;
+            }
         }
-        case OverlayCommand::Type::Clear:
-            break;
-        }
+        graphics.Flush(Gdiplus::FlushIntentionFlush);
     }
 
     POINT src{0, 0};

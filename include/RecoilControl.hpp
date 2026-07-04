@@ -19,6 +19,7 @@ public:
 
     // 开关压枪位移。关闭时会停止 firing 状态并释放 fire_key。
     void setEnabled(bool enabled);
+    void shutdown();
     void setFeatureEnabled(const std::string& key, bool enabled);
 
     // 更新当前手持武器。
@@ -81,6 +82,7 @@ private:
 
     // 后台 worker 生命周期和总开关。
     std::atomic_bool running_{true};
+    std::atomic_bool shutting_down_{false};
     std::atomic_bool enabled_{false};
     std::thread worker_;
 

@@ -40,6 +40,7 @@ public:
     // 读取标点 PNG 的 alpha 通道并二值化。
     // 小地图/测高标点检测用它匹配图标形状。
     static std::vector<cv::Mat> loadAlphaBinaryTemplates(const std::filesystem::path& dir);
+    static std::vector<cv::Mat> loadScaledAlphaBinaryTemplates(const std::filesystem::path& dir, double scale);
 
     // 在灰度 ROI 中匹配一组模板，返回最佳名称和分数。
     // 调用方负责和自身阈值比较。

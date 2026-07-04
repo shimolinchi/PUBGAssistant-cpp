@@ -2,12 +2,25 @@
 
 namespace pubg {
 
+namespace {
+constexpr double kBaseMinimapSide = 457.0;
+
+double minimapTemplateScale(const RegionManager& regions) {
+    const auto rect = regions.getRealRegion("minimap_region");
+    if (!rect || rect->width <= 0 || rect->height <= 0) {
+        return 1.0;
+    }
+    return std::clamp(std::min(rect->width, rect->height) / kBaseMinimapSide, 0.35, 3.0);
+}
+} // namespace
+
 MinimapRadar::MinimapRadar(Config& config, RegionManager& regions, int fps)
     : config_(config), regions_(regions), fps_(fps), colors_(config.markerColors()) {
     auto preferred = config_.paths().templatePath("pnt/minimap");
-    point_templates_ = TemplateMatcher::loadAlphaBinaryTemplates(preferred);
+    const double template_scale = minimapTemplateScale(regions_);
+    point_templates_ = TemplateMatcher::loadScaledAlphaBinaryTemplates(preferred, template_scale);
     if (point_templates_.empty()) {
-        point_templates_ = TemplateMatcher::loadAlphaBinaryTemplates(config_.paths().templatePath("pnt"));
+        point_templates_ = TemplateMatcher::loadScaledAlphaBinaryTemplates(config_.paths().templatePath("pnt"), template_scale);
     }
     for (const auto& tpl : point_templates_) {
         max_tpl_w_ = std::max(max_tpl_w_, tpl.cols);

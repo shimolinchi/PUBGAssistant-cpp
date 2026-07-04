@@ -3,6 +3,16 @@
 namespace pubg {
 
 namespace {
+constexpr double kBaseLargeMapSide = 1079.0;
+
+double largeMapTemplateScale(const RegionManager& regions) {
+    const auto rect = regions.getRealRegion("largemap_region");
+    if (!rect || rect->width <= 0 || rect->height <= 0) {
+        return 1.0;
+    }
+    return std::clamp(std::min(rect->width, rect->height) / kBaseLargeMapSide, 0.35, 3.0);
+}
+
 struct AssistHudLayout {
     double x = 0.0;
     double large_y = 0.0;
@@ -40,9 +50,10 @@ AssistHudLayout assistHudLayout(const RegionManager& regions) {
 
 LargeMapRadar::LargeMapRadar(Config& config, RegionManager& regions)
     : config_(config), regions_(regions), colors_(config.markerColors()) {
-    point_templates_ = TemplateMatcher::loadAlphaBinaryTemplates(config_.paths().templatePath("pnt/largemap"));
+    const double template_scale = largeMapTemplateScale(regions_);
+    point_templates_ = TemplateMatcher::loadScaledAlphaBinaryTemplates(config_.paths().templatePath("pnt/largemap"), template_scale);
     if (point_templates_.empty()) {
-        point_templates_ = TemplateMatcher::loadAlphaBinaryTemplates(config_.paths().templatePath("pnt"));
+        point_templates_ = TemplateMatcher::loadScaledAlphaBinaryTemplates(config_.paths().templatePath("pnt"), template_scale);
     }
     for (const auto& tpl : point_templates_) {
         max_tpl_w_ = std::max(max_tpl_w_, tpl.cols);
@@ -57,6 +68,8 @@ LargeMapRadar::~LargeMapRadar() {
         std::lock_guard lock(mutex_);
         waiting_click_ = false;
         calculating_ = false;
+        manual_waiting_first_ = false;
+        manual_waiting_second_ = false;
         stop_ = true;
     }
     cv_.notify_all();
@@ -98,10 +111,28 @@ void LargeMapRadar::toggleMode() {
         std::lock_guard lock(mutex_);
         waiting_click_ = !waiting_click_;
         calculating_ = false;
+        manual_waiting_first_ = false;
+        manual_waiting_second_ = false;
+        manual_distance_m_ = 0.0;
         cancel_requested_ = false;
         waiting = waiting_click_;
     }
     renderHud(waiting ? "点击大地图中的自己位置" : "");
+}
+
+void LargeMapRadar::startManualMeasure() {
+    {
+        std::lock_guard lock(mutex_);
+        waiting_click_ = false;
+        calculating_ = false;
+        job_pending_ = false;
+        cancel_requested_ = true;
+        manual_waiting_first_ = true;
+        manual_waiting_second_ = false;
+        manual_distance_m_ = 0.0;
+        distances_.clear();
+    }
+    renderHud("点击第一个测距点");
 }
 
 void LargeMapRadar::cancel() {
@@ -110,6 +141,9 @@ void LargeMapRadar::cancel() {
         waiting_click_ = false;
         calculating_ = false;
         job_pending_ = false;
+        manual_waiting_first_ = false;
+        manual_waiting_second_ = false;
+        manual_distance_m_ = 0.0;
         cancel_requested_ = true;
     }
     renderHud();
@@ -117,6 +151,33 @@ void LargeMapRadar::cancel() {
 
 void LargeMapRadar::onMouseClick(int x, int y, bool pressed) {
     if (!pressed) {
+        return;
+    }
+    std::string manual_prompt;
+    {
+        std::lock_guard lock(mutex_);
+        if (manual_waiting_first_) {
+            manual_x1_ = x;
+            manual_y1_ = y;
+            manual_waiting_first_ = false;
+            manual_waiting_second_ = true;
+            manual_prompt = "点击第二个测距点";
+        } else if (manual_waiting_second_) {
+            manual_x2_ = x;
+            manual_y2_ = y;
+            const double km_px = regions_.getRealScale("largemap_1km_px", 0.0);
+            if (km_px > 0.0) {
+                const double px = std::hypot(static_cast<double>(x - manual_x1_), static_cast<double>(y - manual_y1_));
+                manual_distance_m_ = px / km_px * 1000.0;
+                manual_prompt = "手动距离：" + std::to_string(static_cast<int>(std::round(manual_distance_m_))) + "m";
+            } else {
+                manual_prompt = "未校准1km比例尺";
+            }
+            manual_waiting_second_ = false;
+        }
+    }
+    if (!manual_prompt.empty()) {
+        renderHud(manual_prompt);
         return;
     }
     {
@@ -161,7 +222,12 @@ DistanceMap LargeMapRadar::measuredDistance() const {
 
 bool LargeMapRadar::isBusy() const {
     std::lock_guard lock(mutex_);
-    return waiting_click_ || calculating_;
+    return waiting_click_ || calculating_ || manual_waiting_first_ || manual_waiting_second_;
+}
+
+bool LargeMapRadar::isManualMeasureActive() const {
+    std::lock_guard lock(mutex_);
+    return manual_waiting_first_ || manual_waiting_second_ || manual_distance_m_ > 0.0;
 }
 
 void LargeMapRadar::processSingleFrame(int player_x, int player_y) {
@@ -271,28 +337,47 @@ void LargeMapRadar::renderHud(const std::string& prompt) {
     }
     std::vector<MarkerColor> colors;
     DistanceMap distances;
+    double manual_distance = 0.0;
+    int manual_x1 = 0;
+    int manual_y1 = 0;
+    int manual_x2 = 0;
+    int manual_y2 = 0;
     {
         std::lock_guard lock(mutex_);
         colors = colors_;
         distances = distances_;
+        manual_distance = manual_distance_m_;
+        manual_x1 = manual_x1_;
+        manual_y1 = manual_y1_;
+        manual_x2 = manual_x2_;
+        manual_y2 = manual_y2_;
     }
     std::vector<OverlayCommand> cmds;
     const auto layout = assistHudLayout(regions_);
+    const auto base = [&colors] {
+        for (const auto& color : colors) {
+            if (color.name == "Blue") return hexToBgr(color.hex);
+        }
+        return hexToBgr("#017BC2");
+    }();
+    if (manual_distance > 0.0) {
+        cmds.push_back({OverlayCommand::Type::Line, static_cast<double>(manual_x1), static_cast<double>(manual_y1),
+                        static_cast<double>(manual_x2), static_cast<double>(manual_y2), 0, "", base, 2, 18, 230});
+        cmds.push_back({OverlayCommand::Type::Circle, static_cast<double>(manual_x1), static_cast<double>(manual_y1),
+                        0, 0, 4.0, "", base, 0, 18, 230});
+        cmds.push_back({OverlayCommand::Type::Circle, static_cast<double>(manual_x2), static_cast<double>(manual_y2),
+                        0, 0, 4.0, "", base, 0, 18, 230});
+    }
     if (!prompt.empty()) {
-        const auto base = [&colors] {
-            for (const auto& color : colors) {
-                if (color.name == "Blue") return hexToBgr(color.hex);
-            }
-            return hexToBgr("#017BC2");
-        }();
-        cmds.push_back({OverlayCommand::Type::RoundedRect, layout.x, layout.large_y,
-                        layout.x + layout.total_w, layout.large_y + layout.box_h,
+        const double prompt_y = layout.large_y;
+        cmds.push_back({OverlayCommand::Type::RoundedRect, layout.x, prompt_y,
+                        layout.x + layout.total_w, prompt_y + layout.box_h,
                         10, "", base, 0, 18, 51});
-        cmds.push_back({OverlayCommand::Type::RoundedRect, layout.x, layout.large_y,
-                        layout.x + layout.total_w, layout.large_y + layout.box_h,
+        cmds.push_back({OverlayCommand::Type::RoundedRect, layout.x, prompt_y,
+                        layout.x + layout.total_w, prompt_y + layout.box_h,
                         10, "", base, 2, 18, 204});
-        cmds.push_back({OverlayCommand::Type::TextCenter, layout.x, layout.large_y,
-                        layout.x + layout.total_w, layout.large_y + layout.box_h,
+        cmds.push_back({OverlayCommand::Type::TextCenter, layout.x, prompt_y,
+                        layout.x + layout.total_w, prompt_y + layout.box_h,
                         0, prompt, hexToBgr("#FFFFFF"), 1, 12, 255});
     }
     overlay_.setCommands(std::move(cmds));

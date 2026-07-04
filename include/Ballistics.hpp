@@ -34,11 +34,11 @@ public:
 
     // 投掷物：根据距离返回抬高比例。
     // jump_throw=false 使用普通投掷曲线；true 使用跳投曲线。
-    double throwableElevationRatio(double distance, bool jump_throw = false) const;
+    double throwableElevationRatio(double distance, int throw_mode = 0) const;
 
     // 投掷物：根据距离返回捏雷/释放计时。
     // ThrowablesAssistant 会用它决定自动松开左键的时间。
-    double throwableCookTime(double distance, bool jump_throw = false) const;
+    double throwableCookTime(double distance, int throw_mode = 0) const;
 
     // 迫击炮：根据小地图水平距离和垂直测高比例估算真实打击距离。
     // 读取 mortar_config.a_param/b_param；这是 Python 版高低差修正的简化迁移。

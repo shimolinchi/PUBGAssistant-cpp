@@ -24,6 +24,9 @@ class ScaleCalibrationWindow : public QWidget {
 public:
     ScaleCalibrationWindow(Config& config, RegionManager& regions, QWidget* parent = nullptr);
 
+signals:
+    void calibrationSaved();
+
 protected:
     void closeEvent(QCloseEvent* event) override;
     void hideEvent(QHideEvent* event) override;

@@ -57,8 +57,49 @@ std::filesystem::path ResourcePaths::regionConfigDir() const {
     return configDir() / "regions";
 }
 
+std::pair<int, int> ResourcePaths::normalizeRegionResolution(int width, int height) const {
+    width = std::max(1, width);
+    height = std::max(1, height);
+
+    const auto dir = regionConfigDir();
+    auto existsProfile = [&](int w, int h) {
+        std::error_code ec;
+        return std::filesystem::exists(dir / (std::to_string(w) + "_" + std::to_string(h) + ".json"), ec);
+    };
+
+    // Windows/Qt DPI can occasionally produce an off-by-one physical size such as 1921x1080.
+    // If an adjacent calibrated profile exists, always use it for both reading and saving.
+    if ((width % 2) != 0 && width > 1 && existsProfile(width - 1, height)) {
+        return {width - 1, height};
+    }
+    if ((height % 2) != 0 && height > 1 && existsProfile(width, height - 1)) {
+        return {width, height - 1};
+    }
+    if (existsProfile(width, height)) {
+        return {width, height};
+    }
+
+    const std::pair<int, int> candidates[] = {
+        {width - 1, height},
+        {width + 1, height},
+        {width, height - 1},
+        {width, height + 1},
+        {width - 1, height - 1},
+        {width + 1, height + 1},
+        {width - 1, height + 1},
+        {width + 1, height - 1},
+    };
+    for (const auto& [w, h] : candidates) {
+        if (w > 0 && h > 0 && existsProfile(w, h)) {
+            return {w, h};
+        }
+    }
+    return {width, height};
+}
+
 std::filesystem::path ResourcePaths::regionConfigFile(int width, int height) const {
-    return regionConfigDir() / (std::to_string(width) + "_" + std::to_string(height) + ".json");
+    const auto [normalized_w, normalized_h] = normalizeRegionResolution(width, height);
+    return regionConfigDir() / (std::to_string(normalized_w) + "_" + std::to_string(normalized_h) + ".json");
 }
 
 std::filesystem::path ResourcePaths::templatesDir() const {

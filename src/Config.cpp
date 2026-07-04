@@ -21,11 +21,12 @@ bool Config::load() {
 
 bool Config::loadRegionProfile(int width, int height) {
     std::unique_lock<std::shared_mutex> lock(mutex_);
-    active_region_w_ = width;
-    active_region_h_ = height;
+    const auto [normalized_w, normalized_h] = paths_.normalizeRegionResolution(width, height);
+    active_region_w_ = normalized_w;
+    active_region_h_ = normalized_h;
 
     Json profile;
-    const bool loaded = loadOptionalJsonFile(paths_.regionConfigFile(width, height), profile) && profile.is_object();
+    const bool loaded = loadOptionalJsonFile(paths_.regionConfigFile(normalized_w, normalized_h), profile) && profile.is_object();
     if (loaded) {
         data_["real_regions"] = profile.value("real_regions", Json::object());
         data_["real_scales"] = profile.value("real_scales", Json::object());

@@ -307,7 +307,7 @@ void applyThemedPopupWindow(QWidget* window, Config& config) {
             "QPushButton#popupCloseButton:hover{background:#FF746D;}"
             "QPushButton#popupCloseButton:pressed{background:#E0473F;}"
         );
-        QObject::connect(close, &QPushButton::clicked, window, &QWidget::close);
+        QObject::connect(close, &QPushButton::clicked, window, &QWidget::hide);
     }
     if (!window->findChild<QObject*>(QStringLiteral("popupWindowController"))) {
         auto* controller = new PopupWindowController(window);

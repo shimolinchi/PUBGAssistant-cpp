@@ -3,6 +3,7 @@
                     "fire_key":  "\u003cf8\u003e",
                     "game_minimap":  "n",
                     "hip_aim_key":  "mouse_right",
+                    "sprint_key":  "shift",
                     "marker_next":  "\u003cdown\u003e",
                     "marker_prev":  "\u003cup\u003e",
                     "measure_map":  "\u003cf4\u003e",

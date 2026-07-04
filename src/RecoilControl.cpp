@@ -12,13 +12,27 @@ RecoilControl::RecoilControl(Config& config, RegionManager* regions) : config_(c
 }
 
 RecoilControl::~RecoilControl() {
+    shutdown();
+}
+
+void RecoilControl::shutdown() {
+    bool expected = false;
+    if (!shutting_down_.compare_exchange_strong(expected, true)) {
+        return;
+    }
+    enabled_ = false;
     running_ = false;
 #if PUBG_ENABLE_INPUT_CONTROL
+    int fire_vk = 0;
     {
         std::lock_guard lock(mutex_);
         stopSrBreathTrackingLocked();
         firing_ = false;
         fire_start_ = 0.0;
+        fire_vk = fire_vk_;
+    }
+    if (fire_vk) {
+        InputController::keyUp(fire_vk);
     }
     if (worker_.joinable()) {
         worker_.join();
@@ -26,7 +40,9 @@ RecoilControl::~RecoilControl() {
     if (sg_action_thread_.joinable()) {
         sg_action_thread_.join();
     }
-    InputController::keyUp(fire_vk_);
+    if (fire_vk) {
+        InputController::keyUp(fire_vk);
+    }
 #endif
 }
 

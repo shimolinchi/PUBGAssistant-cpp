@@ -332,7 +332,7 @@ void SpecialAssistants::run() {
             if (manual["mortar"]) {
                 drawMortar(dists, elevs, hex, cmds);
             }
-            if (manual["mortar"] && !large_map_.isBusy()) {
+            if (manual["mortar"] && !large_map_.isBusy() && !large_map_.isManualMeasureActive()) {
                 drawLargeMapDistances(large_map_.measuredDistance(), elevs, hex, cmds);
             }
             if (manual["rocket"]) {

@@ -1025,7 +1025,8 @@ void MainWindow::openRegionCalibrationWindow() {
                                  : !regions_.getRealRegion(item.key.toStdString()).has_value());
         button_grid->addWidget(b, i / 2, i % 2);
         b->installEventFilter(new HoverCallbackFilter([showPreview, item] { showPreview(item); }, b));
-        connect(b, &QPushButton::clicked, this, [this, item, square_keys] {
+        QPointer<RoundedButton> button = b;
+        connect(b, &QPushButton::clicked, this, [this, item, square_keys, button] {
             if (region_calibration_overlay_) {
                 region_calibration_overlay_->raise();
                 region_calibration_overlay_->activateWindow();
@@ -1040,7 +1041,14 @@ void MainWindow::openRegionCalibrationWindow() {
                 debug_overlay_.show(false);
             }
             connect(ov, &RegionCalibrationOverlay::calibrationClosed, this, [this](bool changed) {
+                Q_UNUSED(changed);
                 refreshCalibrationWarnings();
+            });
+            connect(ov, &RegionCalibrationOverlay::calibrationClosed, this, [this, item, button](bool changed) {
+                if (changed && button) {
+                    button->setWarning(item.scale ? regions_.getRealScale(item.key.toStdString(), 0.0) <= 0.0
+                                                  : !regions_.getRealRegion(item.key.toStdString()).has_value());
+                }
                 if (debug_overlay_enabled_) {
                     if (!debug_overlay_.created()) {
                         regions_.createOverlay(debug_overlay_, L"PUBGAssistant DebugRegions", true, false);
@@ -1078,13 +1086,14 @@ void MainWindow::buildKeyTab(QWidget* tab) {
         {QStringLiteral("地图点位显示"), "mouse_map_assist", false},
         {QStringLiteral("投掷物自动瞬爆"), "throw", true},
     };
-    const QVector<RowDef> game_rows{
+    QVector<RowDef> game_rows{
         {QStringLiteral("打开装备栏"), "toggle_equipment", true},
         {QStringLiteral("打开小地图"), "game_minimap", true},
         {QStringLiteral("打开大地图"), "open_large_map", true},
         {QStringLiteral("开火按键"), "fire_key", true},
         {QStringLiteral("腰射瞄准（长按）"), "hip_aim_key", true},
     };
+    game_rows.push_back({QStringLiteral("加速跑按键"), "sprint_key", true});
     const auto hotkeys = config_.hotkeys();
     auto hotkeyValue = [&](const QString& action, const std::string& fallback) {
         auto it = hotkeys.find(action.toStdString());
@@ -1121,6 +1130,7 @@ void MainWindow::buildKeyTab(QWidget* tab) {
             : action == "toggle_window" ? "<home>"
             : action == "game_minimap" ? "n"
             : action == "hip_aim_key" ? "mouse_right"
+            : action == "sprint_key" ? "shift"
             : action == "open_large_map" ? "m"
             : action == "marker_prev" ? "<up>"
             : action == "marker_next" ? "<down>"
@@ -1321,6 +1331,9 @@ void MainWindow::openScaleCalibrator() {
             scale_calibration_window_ = nullptr;
             refreshCalibrationWarnings();
         });
+        connect(scale_calibration_window_, &ScaleCalibrationWindow::calibrationSaved, this, [this] {
+            refreshCalibrationWarnings();
+        });
     }
     showWindowInsideScreen(scale_calibration_window_);
 }
@@ -1344,7 +1357,7 @@ void MainWindow::openSpecialWeaponDebugger() {
         return;
     }
     auto* window = new SpecialWeaponDebuggerWindow(config_);
-    window->setAttribute(Qt::WA_DeleteOnClose, true);
+    window->setAttribute(Qt::WA_DeleteOnClose, false);
     window->setWindowFlag(Qt::Window, true);
     special_weapon_debugger_window_ = window;
     connect(window, &QObject::destroyed, this, [this] { special_weapon_debugger_window_ = nullptr; });
@@ -1485,7 +1498,8 @@ bool MainWindow::captureHotkey(const QString& key, const QStringList& modifiers)
 
     const bool single_only = capturing_action_ == "throw" || capturing_action_ == "toggle_equipment" ||
                              capturing_action_ == "game_minimap" || capturing_action_ == "open_large_map" ||
-                             capturing_action_ == "hip_aim_key" || capturing_action_ == "fire_key";
+                             capturing_action_ == "hip_aim_key" || capturing_action_ == "sprint_key" ||
+                             capturing_action_ == "fire_key";
     if (single_only && !modifiers.isEmpty()) {
         const QString action = capturing_action_;
         if (hotkey_labels_.contains(action)) {
@@ -1642,6 +1656,12 @@ void MainWindow::closeEvent(QCloseEvent* event) {
     if (!closing_) {
         closing_ = true;
         closeAuxiliaryWindows();
+        if (callbacks_.prepare_for_close) {
+            callbacks_.prepare_for_close();
+        }
+#ifdef _WIN32
+        ExitProcess(0);
+#endif
         QApplication::quit();
     }
     QMainWindow::closeEvent(event);
@@ -1664,6 +1684,7 @@ void MainWindow::resetDefaultHotkeys() {
             {"mortar_auto_aim", "mouse_right"},
             {"game_minimap", "n"},
             {"hip_aim_key", "mouse_right"},
+            {"sprint_key", "shift"},
             {"open_large_map", "m"},
             {"marker_prev", "<up>"},
             {"marker_next", "<down>"},

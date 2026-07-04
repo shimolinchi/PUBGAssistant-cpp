@@ -44,6 +44,7 @@ public:
     void cycleMarkerColor(int direction);
     [[nodiscard]] std::string currentMarkerColor() const;
     void reloadHotkeys();
+    void prepareForUiClose();
     void shutdown();
 
 private:
@@ -84,11 +85,13 @@ private:
     bool gameMenuInputSuppressed() const;
     bool shouldHoldMortarStateAfterEsc() const;
     void handleMortarInteractKey(bool pressed);
+    void handleMeasureMapHotkey();
     void joinMortarAutoAimHoldWorker();
     void startMortarMountConfirmation();
     void setMortarMounted(bool mounted);
     void applyMortarMounted(bool mounted);
     void joinMortarMountWorker();
+    void stopRuntimeForShutdown();
     bool shouldShowMarkerIndicator() const;
     bool canShowMapPointsNow() const;
     bool isRecoilWeapon(const std::string& weapon) const;
@@ -143,6 +146,7 @@ private:
     std::atomic_uint64_t mortar_auto_aim_hold_session_{0};
     std::mutex mortar_auto_aim_hold_mutex_;
     std::thread mortar_auto_aim_hold_worker_;
+    double last_measure_map_hotkey_time_ = 0.0;
     std::vector<std::string> marker_color_order_{"Yellow", "Orange", "Blue", "Green"};
     std::string current_marker_color_ = "Yellow";
     std::map<int, WeaponSlotInfo> equipment_;
@@ -150,7 +154,9 @@ private:
     std::unordered_map<std::string, bool> assistant_enabled_;
     std::optional<std::pair<std::string, double>> pending_weapon_update_;
     ui::MainWindow* main_window_ = nullptr;
+    bool runtime_stopped_ = false;
     bool shutting_down_ = false;
+    bool resources_released_ = false;
 };
 
 } // namespace pubg

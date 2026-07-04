@@ -430,6 +430,7 @@ void ScaleCalibrationWindow::saveConfig() {
     height_scale_label_->setText("100%");
     result_label_->setText(QStringLiteral("配置已保存，截图继续实时刷新。"));
     updatePreview();
+    emit calibrationSaved();
 }
 
 void ScaleCalibrationWindow::refreshRegionComboWarnings() {
