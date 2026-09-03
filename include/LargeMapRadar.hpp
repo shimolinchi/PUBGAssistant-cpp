@@ -11,7 +11,7 @@
 namespace pubg {
 
 // 大地图一次性测距模块，对应 Python 版 modules/largemap_radar.py。
-// F4 触发后进入等待点击/计算模式，截取 largemap_region，识别大地图标点并把结果显示在小地图上方。
+// 大地图测距热键（默认 F5）触发后进入等待点击/计算模式，截取 largemap_region，识别大地图标点并把结果显示在小地图上方。
 class LargeMapRadar {
 public:
     LargeMapRadar(Config& config, RegionManager& regions);
@@ -23,7 +23,7 @@ public:
     // 更新色盲模式下的标点颜色阈值。
     void setMarkerColors(std::vector<MarkerColor> colors);
 
-    // 进入/退出一次性测距模式。主窗口 F4 会调用。
+    // 进入/退出一次性测距模式。主窗口的大地图测距热键（默认 F5）会调用。
     void toggleMode();
     void startManualMeasure();
 

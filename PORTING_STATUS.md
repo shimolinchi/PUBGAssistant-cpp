@@ -28,7 +28,7 @@ implementation but still differ from the Python runtime behavior.
 - Rocket, VSS, crossbow, and mortar HUD calculations.
 - Map point assistant controls for map/category/size/color-blind mode.
 - Map point assistant Y-axis mapping and legend.
-- Large-map measurement after `F4` and the next left click, using marker
+- Large-map measurement after `F5` and the next left click, using marker
   alpha-template matching against the color mask.
 - Throwable auto-cook/auto-release, pull-ring key press, distance guard, and
   jump-throw timing.
@@ -102,7 +102,7 @@ implementation but still differ from the Python runtime behavior.
    - Press `F1`; open inventory with `Tab`; equipment logs show both weapons.
    - Hold the active weapon; current weapon logs update.
    - Press `F3`; recoil movement is in the expected direction and magnitude.
-   - Press `F4`, click own position on large map, and verify large-map one-shot distances.
+   - Press `F5`, click own position on large map, and verify large-map one-shot distances.
    - Test Rocket/VSS/Crossbow/Mortar HUD after marker detection works.
    - Test throw auto-release with the configured throw key.
    - Test C4 install and prompt lifecycle.

@@ -195,7 +195,7 @@ void SpecialAssistants::drawRocket(const DistanceMap& dists, const std::unordere
         const double y = std::min(cy + ratio * line_len, regions_.screenHeight() - 10.0);
         const auto bgr = hexToBgr(hex.count(color) ? hex.at(color) : "#FFFFFF");
         cmds.push_back({OverlayCommand::Type::Line, cx - 28, y, cx + 28, y, 0, "", bgr, 2});
-        cmds.push_back({OverlayCommand::Type::Text, cx + 36, y - 10, 0, 0, 0, std::to_string(static_cast<int>(std::round(dist))) + "m", bgr, 1, assistTextSize(config_, 18), assistTextAlpha(config_)});
+        cmds.push_back({OverlayCommand::Type::Text, cx + 36, y - 10, 0, 0, 0, std::to_string(static_cast<int>(std::round(dist))) + "m", bgr, 1, static_cast<double>(assistTextSize(config_, 18)), assistTextAlpha(config_)});
     }
 }
 
@@ -215,7 +215,7 @@ void SpecialAssistants::drawVss(const DistanceMap& dists, const std::unordered_m
         const double y = cy + ballistics_.vssDropRatio(dist) * regions_.screenHeight();
         const auto bgr = hexToBgr(hex.count(color) ? hex.at(color) : "#FFFFFF");
         cmds.push_back({OverlayCommand::Type::Line, cx - 22, y, cx + 22, y, 0, "", bgr, 2});
-        cmds.push_back({OverlayCommand::Type::Text, cx + 30, y - 9, 0, 0, 0, std::to_string(static_cast<int>(std::round(dist))) + "m", bgr, 1, assistTextSize(config_, 16), assistTextAlpha(config_)});
+        cmds.push_back({OverlayCommand::Type::Text, cx + 30, y - 9, 0, 0, 0, std::to_string(static_cast<int>(std::round(dist))) + "m", bgr, 1, static_cast<double>(assistTextSize(config_, 16)), assistTextAlpha(config_)});
     }
 }
 
@@ -238,7 +238,7 @@ void SpecialAssistants::drawCrossbow(const DistanceMap& dists, const std::unorde
         const double y = cy + ballistics_.crossbowDropRatio(dist) * regions_.screenHeight();
         const auto bgr = hexToBgr(hex.count(color) ? hex.at(color) : "#FFFFFF");
         cmds.push_back({OverlayCommand::Type::Line, cx - 28, y, cx + 28, y, 0, "", bgr, 2});
-        cmds.push_back({OverlayCommand::Type::Text, cx + 36, y - 10, 0, 0, 0, std::to_string(static_cast<int>(std::round(dist))) + "m", bgr, 1, assistTextSize(config_, 16), assistTextAlpha(config_)});
+        cmds.push_back({OverlayCommand::Type::Text, cx + 36, y - 10, 0, 0, 0, std::to_string(static_cast<int>(std::round(dist))) + "m", bgr, 1, static_cast<double>(assistTextSize(config_, 16)), assistTextAlpha(config_)});
     }
 }
 
@@ -309,7 +309,7 @@ void SpecialAssistants::drawDistancePanelRow(const DistanceMap& dists, const Ele
         cmds.push_back({OverlayCommand::Type::RoundedRect, bx, by, bx + layout.box_w, by + layout.box_h,
                         10, "", bgr, 2, 18, 204});
         cmds.push_back({OverlayCommand::Type::TextCenter, bx, by, bx + layout.box_w, by + layout.box_h,
-                        0, text, hexToBgr("#FFFFFF"), 1, font_size, assistTextAlpha(config_)});
+                        0, text, hexToBgr("#FFFFFF"), 1, static_cast<double>(font_size), assistTextAlpha(config_)});
         ++i;
     }
 }

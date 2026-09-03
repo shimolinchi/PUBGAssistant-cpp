@@ -4,10 +4,19 @@
 #include <shared_mutex>
 #include <utility>
 
+#include "AiAimSettings.hpp"
 #include "Common.hpp"
 #include "ResourcePaths.hpp"
 
 namespace pubg {
+
+// 编辑基线同时保存文档和本次读取时分文件是否存在；这是内存元数据，不写入 JSON。
+struct AiAimSettingsDocumentSnapshot {
+    Json document = Json::object();
+    bool split_file_exists = false;
+
+    bool operator==(const AiAimSettingsDocumentSnapshot&) const = default;
+};
 
 // 全局配置管理器，对应 Python 版中各模块直接读取的配置数据。
 // 磁盘上会把大块配置拆到多个 JSON 文件，内存中仍合并为一份完整配置供各模块读取。
@@ -16,12 +25,13 @@ public:
     // paths 决定 config/*.json 和 assets/templates 的查找根目录。
     explicit Config(ResourcePaths paths);
 
-    // 读取主配置并合并 map_data/recoil_settings/special_assistants 分文件。
+    // 读取主配置并合并 map_data/recoil_settings/special_assistants/ai_aim 分文件。
     // 如果分文件不存在，会保留主配置里同名字段，便于兼容旧版单文件配置。
     bool load();
     bool loadRegionProfile(int width, int height);
 
-    // 将当前 data_ 按职责写回多个 JSON 文件。主配置不再保存地图点位、压枪和特殊助手大字段。
+    // 将 UI 可编辑配置按职责写回多个 JSON 文件。AI 参数独立编辑、下次启动生效；
+    // 普通保存不会重写 ai_aim_settings.json，避免覆盖运行期间的外部编辑。
     bool save();
     bool saveRegionProfile() const;
     [[nodiscard]] bool hasActiveRegionProfile() const noexcept { return active_region_w_ > 0 && active_region_h_ > 0; }
@@ -56,10 +66,26 @@ public:
     // 解析 hotkeys 字段。App 和快捷键设置页会用它注册全局轮询热键。
     [[nodiscard]] std::unordered_map<std::string, std::string> hotkeys() const;
 
+    // 返回内存中的 AI 配置快照；保存成功后由宿主将该快照应用到运行模块。
+    // JSON 映射与校验只在 AiAimSettings 中实现。
+    [[nodiscard]] AiAimSettings aiAimSettings() const;
+
+    // 编辑器读取磁盘最新原文；只有分文件缺失时才退回内存旧版配置/默认空对象。
+    // JSON 语法或 I/O 失败返回 false；schema/类型校验由 parseAiAimSettings 统一处理。
+    [[nodiscard]] bool readAiAimSettingsDocument(
+        AiAimSettingsDocumentSnapshot& snapshot, std::string& error) const;
+
+    // 显式保存 AI 分文件：校验后同时检查 expected 的文档和分文件存在性，
+    // 用同目录临时文件原子替换，成功后才更新内存。普通 save() 不调用此接口。
+    [[nodiscard]] bool saveAiAimSettings(
+        const Json& document, const AiAimSettingsDocumentSnapshot& expected, std::string& error);
+
 private:
     bool loadJsonFile(const std::filesystem::path& path, Json& out) const;
     bool loadOptionalJsonFile(const std::filesystem::path& path, Json& out) const;
     bool saveJsonFile(const std::filesystem::path& path, const Json& data) const;
+    bool readAiAimSettingsDocumentUnlocked(
+        AiAimSettingsDocumentSnapshot& snapshot, std::string& error) const;
     void mergeSplitConfig();
     [[nodiscard]] Json baseConfigWithoutSplitSections() const;
     [[nodiscard]] Json regionProfileConfig() const;

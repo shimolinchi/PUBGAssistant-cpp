@@ -6,10 +6,12 @@
                     "sprint_key":  "shift",
                     "marker_next":  "\u003cdown\u003e",
                     "marker_prev":  "\u003cup\u003e",
-                    "measure_map":  "\u003cf4\u003e",
+                    "measure_map":  "\u003cf5\u003e",
+                    "ai_aim_hold":  "mouse_right",
                     "mortar_auto_aim":  "mouse_right",
                     "open_large_map":  "m",
                     "throw":  "b",
+                    "toggle_ai_aim":  "\u003cf4\u003e",
                     "toggle_display":  "\u003cf2\u003e",
                     "toggle_equipment":  "tab",
                     "toggle_recoil":  "\u003cf3\u003e",
@@ -245,6 +247,7 @@
                      "marker_size":  "medium",
                      "marker_size_index":  1,
                      "switches":  {
+                                      "ai_aim":  false,
                                       "display":  false,
                                       "recoil":  false,
                                       "weapon_detection":  true

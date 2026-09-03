@@ -176,11 +176,14 @@ void OverlayWindow::clear() {
 
 void OverlayWindow::pumpMessages() {
 #ifdef _WIN32
-    if (!isOwnerThread()) {
+    const HWND hwnd = hwnd_;
+    if (!hwnd || !isOwnerThread()) {
         return;
     }
     MSG msg;
-    while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
+    // Only dispatch this overlay's messages. Pumping the entire owner-thread
+    // queue here can re-enter Qt/App callbacks while their locks are held.
+    while (PeekMessageW(&msg, hwnd, 0, 0, PM_REMOVE)) {
         TranslateMessage(&msg);
         DispatchMessageW(&msg);
     }
@@ -455,7 +458,7 @@ void OverlayWindow::paint() {
                     static_cast<int>(cmd.x1 + cmd.radius), static_cast<int>(cmd.y1 + cmd.radius));
             break;
         case OverlayCommand::Type::Text: {
-            HFONT font = CreateFontW(-cmd.font_size, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+            HFONT font = CreateFontW(-static_cast<int>(std::lround(cmd.font_size)), 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
                                      OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
                                      DEFAULT_PITCH, L"Microsoft YaHei");
             HGDIOBJ old_font = SelectObject(mem_dc, font);
@@ -467,7 +470,7 @@ void OverlayWindow::paint() {
             break;
         }
         case OverlayCommand::Type::TextCenter: {
-            HFONT font = CreateFontW(-cmd.font_size, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+            HFONT font = CreateFontW(-static_cast<int>(std::lround(cmd.font_size)), 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
                                      OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
                                      DEFAULT_PITCH, L"Microsoft YaHei");
             HGDIOBJ old_font = SelectObject(mem_dc, font);

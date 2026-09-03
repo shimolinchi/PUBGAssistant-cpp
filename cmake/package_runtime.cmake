@@ -12,6 +12,19 @@ file(COPY "${BUILD_DIR}/PUBGAssistant-cpp.exe" DESTINATION "${PACKAGE_DIR}")
 file(COPY "${SOURCE_DIR}/assets" DESTINATION "${PACKAGE_DIR}")
 file(COPY "${SOURCE_DIR}/config" DESTINATION "${PACKAGE_DIR}")
 file(COPY "${SOURCE_DIR}/icon.ico" DESTINATION "${PACKAGE_DIR}")
+file(MAKE_DIRECTORY "${PACKAGE_DIR}/ai_aim_runtime")
+file(COPY "${SOURCE_DIR}/modules/pubg_ai_aim/runtime/"
+     DESTINATION "${PACKAGE_DIR}/ai_aim_runtime")
+file(COPY
+    "${SOURCE_DIR}/modules/pubg_ai_aim/LICENSE.md"
+    "${SOURCE_DIR}/modules/pubg_ai_aim/THIRD_PARTY_NOTICES.md"
+    DESTINATION "${PACKAGE_DIR}/ai_aim_runtime")
+file(MAKE_DIRECTORY "${PACKAGE_DIR}/ai_aim_runtime/licenses/onnxruntime")
+file(COPY "${SOURCE_DIR}/modules/pubg_ai_aim/third_party/onnxruntime/licenses/"
+     DESTINATION "${PACKAGE_DIR}/ai_aim_runtime/licenses/onnxruntime")
+file(MAKE_DIRECTORY "${PACKAGE_DIR}/ai_aim_runtime/licenses/directml")
+file(COPY "${SOURCE_DIR}/modules/pubg_ai_aim/third_party/directml/licenses/"
+     DESTINATION "${PACKAGE_DIR}/ai_aim_runtime/licenses/directml")
 if(EXISTS "${SOURCE_DIR}/README.pdf")
     file(COPY "${SOURCE_DIR}/README.pdf" DESTINATION "${PACKAGE_DIR}")
 endif()

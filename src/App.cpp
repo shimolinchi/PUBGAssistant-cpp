@@ -1,11 +1,15 @@
 #include "App.hpp"
 
+#include "AiAimCoordinatorProduction.hpp"
 #include "BuildConfig.hpp"
+#include "EquipmentSelection.hpp"
+#include "PrimaryHotkeys.hpp"
+#include "ShutdownSequence.hpp"
 
 #include <algorithm>
 #include <cctype>
 #include <iostream>
-#include <tuple>
+#include <utility>
 #include <vector>
 #include <QApplication>
 #include <QDialog>
@@ -190,6 +194,7 @@ App::App()
     migrateLegacyDefaultHotkeys();
     PUBG_HEAP_PROBE("ctor.afterHotkeyMigrate");
     config_.save();
+    ai_aim_settings_ = config_.aiAimSettings();
     regions_ = std::make_unique<RegionManager>(config_, display);
     PUBG_HEAP_PROBE("ctor.afterRegions");
     minimap_ = std::make_unique<MinimapRadar>(config_, *regions_, 60);
@@ -202,7 +207,8 @@ App::App()
     PUBG_HEAP_PROBE("ctor.afterEquipmentDetector");
     gesture_identifier_ = std::make_unique<GestureIdentifier>(config_, *regions_, 30, 0.65);
     PUBG_HEAP_PROBE("ctor.afterGestureIdentifier");
-    recoil_ = std::make_unique<RecoilControl>(config_, regions_.get());
+    mouse_motion_dispatcher_ = makeMouseMotionDispatcher();
+    recoil_ = std::make_unique<RecoilControl>(config_, regions_.get(), mouse_motion_dispatcher_);
     PUBG_HEAP_PROBE("ctor.afterRecoil");
     large_map_ = std::make_unique<LargeMapRadar>(config_, *regions_);
     PUBG_HEAP_PROBE("ctor.afterLargeMap");
@@ -211,6 +217,7 @@ App::App()
     map_points_ = std::make_unique<MapPointAssistant>(config_, *regions_);
     PUBG_HEAP_PROBE("ctor.afterMapPoints");
     mortar_auto_aim_ = std::make_unique<MortarAutoAim>(config_, *regions_, *minimap_, *large_map_, *elevation_,
+        mouse_motion_dispatcher_,
         [this](const std::string& message, const std::string& marker_color) {
         if (status_hud_) {
             const auto hex = config_.markerHex();
@@ -230,6 +237,12 @@ App::App()
     PUBG_HEAP_PROBE("ctor.afterC4");
     status_hud_ = std::make_unique<StatusHud>(config_, *regions_);
     PUBG_HEAP_PROBE("ctor.afterStatusHud");
+    ai_aim_ = makeProductionAiAimCoordinator(
+        paths_, ai_aim_settings_, *regions_, mouse_motion_dispatcher_);
+    ai_aim_->setStatusCallback([this](const AiAimRuntimeStatus& status) {
+        handleAiAimStatus(status);
+    });
+    PUBG_HEAP_PROBE("ctor.afterAiAim");
     assistant_enabled_ = {
         {"mortar", true}, {"rocket", true}, {"throwables", true},
         {"vss", true}, {"crossbow", true}, {"c4", true},
@@ -241,24 +254,33 @@ App::App()
     PUBG_HEAP_PROBE("ctor.afterWireCallbacks");
 }
 
+App::~App() noexcept {
+    shutdown();
+}
+
 void App::wireCallbacks() {
     weapon_detector_->setEnabled(false, [this](const std::string& weapon, double score) {
-        if (shutting_down_) return;
+        if (shutting_down_.load(std::memory_order_acquire)) return;
         c4_->onWeaponDetected(weapon, score);
         updateWeaponFromDetectors(weapon, score);
     });
     equipment_detector_->setEnabled(false, [this](const std::map<int, WeaponSlotInfo>& equipment_slots) {
-        if (shutting_down_) return;
+        if (shutting_down_.load(std::memory_order_acquire)) return;
         updateEquipment(equipment_slots);
     });
     equipment_detector_->setStatusCallback([this](const std::string& status) {
-        if (shutting_down_) return;
+        if (shutting_down_.load(std::memory_order_acquire)) return;
+        {
+            std::lock_guard lock(state_mutex_);
+            equipment_ui_open_ = status != "closed";
+        }
         if (status_hud_) {
             status_hud_->setEquipmentStatus(status);
         }
+        publishAiActivation(hotkeys_.isGameForeground());
     });
     gesture_identifier_->setEnabled(false, [this](const std::string& stance, double) {
-        if (shutting_down_) return;
+        if (shutting_down_.load(std::memory_order_acquire)) return;
         {
             std::lock_guard lock(state_mutex_);
             current_stance_ = stance;
@@ -267,6 +289,7 @@ void App::wireCallbacks() {
         if (status_hud_) {
             status_hud_->setStance(stance);
         }
+        publishAiCombatContext();
     });
 
     registerHotkeys();
@@ -281,12 +304,19 @@ void App::registerHotkeys() {
     hotkeys_.setPassthroughProcess(config_.read([](const Json& data) {
         return data.value("game_process", std::string("TslGame.exe"));
     }));
-    hotkeys_.addHotkey("toggle_weapon_detection", hotkeyCombo("toggle_weapon_detection", "<f1>"), [this] { toggleWeaponDetection(); });
-    hotkeys_.addHotkey("toggle_display", hotkeyCombo("toggle_display", "<f2>"), [this] { toggleDisplay(); });
+    const auto configured_hotkeys = config_.hotkeys();
+    auto addPrimaryHotkey = [&](const char* action, auto callback) {
+        if (configured_hotkeys.contains(action)) {
+            hotkeys_.addHotkey(action, hotkeyCombo(action, ""), std::move(callback));
+        }
+    };
+    addPrimaryHotkey("toggle_weapon_detection", [this] { toggleWeaponDetection(); });
+    addPrimaryHotkey("toggle_display", [this] { toggleDisplay(); });
 #if PUBG_ENABLE_INPUT_CONTROL
-    hotkeys_.addHotkey("toggle_recoil", hotkeyCombo("toggle_recoil", "<f3>"), [this] { toggleRecoil(); });
+    addPrimaryHotkey("toggle_recoil", [this] { toggleRecoil(); });
+    addPrimaryHotkey("toggle_ai_aim", [this] { toggleAiAim(); });
 #endif
-    hotkeys_.addHotkey("measure_map", hotkeyCombo("measure_map", "<f4>"), [this] {
+    addPrimaryHotkey("measure_map", [this] {
         handleMeasureMapHotkey();
     });
     hotkeys_.addStateWatcher("mortar_auto_aim", hotkeyVk("mortar_auto_aim", "mouse_right"), [this](bool pressed) {
@@ -309,7 +339,8 @@ void App::registerHotkeys() {
                 bool can_trigger = false;
                 {
                     std::lock_guard lock(state_mutex_);
-                    can_trigger = !shutting_down_ && display_enabled_ && mortar_mounted_;
+                    can_trigger = !shutting_down_.load(std::memory_order_acquire) &&
+                                  display_enabled_ && mortar_mounted_;
                 }
                 if (can_trigger && mortar_auto_aim_) {
                     mortar_auto_aim_->trigger(currentMarkerColor());
@@ -318,8 +349,12 @@ void App::registerHotkeys() {
         }
     });
     hotkeys_.addHotkey("toggle_window", hotkeyCombo("toggle_window", "<home>"), [this] {
-        if (main_window_) {
-            QMetaObject::invokeMethod(main_window_, [this] { main_window_->toggleWindowVisible(); }, Qt::QueuedConnection);
+        if (auto* window = main_window_.load(std::memory_order_acquire)) {
+            QMetaObject::invokeMethod(window, [this] {
+                if (auto* current = main_window_.load(std::memory_order_acquire)) {
+                    current->toggleWindowVisible();
+                }
+            }, Qt::QueuedConnection);
         }
     });
     hotkeys_.addHotkey("toggle_equipment", hotkeyCombo("toggle_equipment", ""), [this] {
@@ -335,16 +370,26 @@ void App::registerHotkeys() {
     hotkeys_.addHotkey("marker_prev", hotkeyCombo("marker_prev", "<up>"), [this] { cycleMarkerColor(-1); });
     hotkeys_.addHotkey("marker_next", hotkeyCombo("marker_next", "<down>"), [this] { cycleMarkerColor(1); });
     hotkeys_.addStateWatcher("sg_peek_left", InputController::parseVirtualKey("q"), [this](bool pressed) {
+        {
+            std::lock_guard lock(state_mutex_);
+            lean_left_pressed_ = pressed;
+        }
         if (pressed && recoil_) {
             recoil_->setSgPeekDirection(1);
             updateStatusHud();
         }
+        publishAiCombatContext();
     });
     hotkeys_.addStateWatcher("sg_peek_right", InputController::parseVirtualKey("e"), [this](bool pressed) {
+        {
+            std::lock_guard lock(state_mutex_);
+            lean_right_pressed_ = pressed;
+        }
         if (pressed && recoil_) {
             recoil_->setSgPeekDirection(2);
             updateStatusHud();
         }
+        publishAiCombatContext();
     });
     hotkeys_.addStateWatcher("throw", hotkeyVk("throw", "b"), [this](bool pressed) {
         const bool should_throw = [this] {
@@ -385,6 +430,7 @@ void App::registerHotkeys() {
         if (show_map_points) {
             map_points_->setEnabled(true);
         }
+        publishAiCombatContext();
     });
     hotkeys_.addStateWatcher("middle_mouse", VK_MBUTTON, [this](bool pressed) {
         bool show_map_points = false;
@@ -419,6 +465,15 @@ void App::registerHotkeys() {
         if (hide_map_points && map_points_) {
             map_points_->setEnabled(false);
         }
+        publishAiCombatContext();
+        publishAiActivation(hotkeys_.isGameForeground());
+    });
+    hotkeys_.addStateWatcher("ai_aim_hold", hotkeyVk("ai_aim_hold", "mouse_right"), [this](bool pressed) {
+        {
+            std::lock_guard lock(state_mutex_);
+            ai_aim_hold_pressed_ = pressed;
+        }
+        publishAiActivation(hotkeys_.isGameForeground());
     });
     hotkeys_.addStateWatcher("cancel_map_helpers", hotkeyVk("open_large_map", "m"), [this](bool pressed) {
         if (!pressed) {
@@ -431,6 +486,11 @@ void App::registerHotkeys() {
         if (map_points_) {
             map_points_->setEnabled(false);
         }
+        {
+            std::lock_guard lock(state_mutex_);
+            large_map_open_ = !large_map_open_;
+        }
+        publishAiActivation(hotkeys_.isGameForeground());
     });
     hotkeys_.addStateWatcher("mortar_interact", InputController::parseVirtualKey("f"), [this](bool pressed) {
         handleMortarInteractKey(pressed);
@@ -458,41 +518,101 @@ void App::reloadHotkeys() {
     }
 }
 
-void App::stopRuntimeForShutdown() {
+void App::requireOwnerThread() const noexcept {
+    if (std::this_thread::get_id() != owner_thread_id_) {
+        // Qt UI ownership and App-owned worker joins require a single owner.
+        // Continuing teardown from a worker would permit self-join/UAF paths.
+        std::terminate();
+    }
+}
+
+void App::stopRuntimeForShutdown() noexcept {
+    requireOwnerThread();
     {
         std::lock_guard lock(state_mutex_);
-        if (runtime_stopped_) {
+        if (!runtime_shutdown_.begin()) {
             return;
         }
-        runtime_stopped_ = true;
-        shutting_down_ = true;
+        shutting_down_.store(true, std::memory_order_release);
     }
     PUBG_HEAP_PROBE("shutdown.enter");
-    hotkeys_.stop();
+    ShutdownSequence shutdown;
+    shutdown.runMandatory([this] { hotkeys_.stop(); });
+    shutdown.runMandatory([this] { stopAiStateMonitor(); });
+    if (ai_aim_) {
+        shutdown.runMandatory([this] { ai_aim_->setEnabled(false); });
+        shutdown.runMandatory([this] { ai_aim_->shutdown(); });
+    }
     ++mortar_auto_aim_hold_session_;
-    joinMortarAutoAimHoldWorker();
+    shutdown.runMandatory([this] { joinMortarAutoAimHoldWorker(); });
     ++mortar_mount_session_;
-    joinMortarMountWorker();
-    {
+    shutdown.runMandatory([this] { joinMortarMountWorker(); });
+    shutdown.runMandatory([this] {
         std::lock_guard control_lock(control_mutex_);
         if (equipment_detector_) equipment_detector_->setEnabled(false);
+    });
+    shutdown.runMandatory([this] {
+        std::lock_guard control_lock(control_mutex_);
         if (weapon_detector_) weapon_detector_->setEnabled(false);
+    });
+    shutdown.runMandatory([this] {
+        std::lock_guard control_lock(control_mutex_);
         if (gesture_identifier_) gesture_identifier_->setEnabled(false);
+    });
+    shutdown.runMandatory([this] {
+        std::lock_guard control_lock(control_mutex_);
         if (recoil_) recoil_->shutdown();
+    });
+    shutdown.runMandatory([this] {
+        std::lock_guard control_lock(control_mutex_);
         if (minimap_) {
             minimap_->setEnabled(false);
             minimap_->setDisplay(false);
         }
+    });
+    shutdown.runMandatory([this] {
+        std::lock_guard control_lock(control_mutex_);
         if (elevation_) {
             elevation_->setEnabled(false);
             elevation_->setDisplay(false);
         }
+    });
+    shutdown.runMandatory([this] {
+        std::lock_guard control_lock(control_mutex_);
         if (large_map_) large_map_->setDisplay(false);
+    });
+    shutdown.runMandatory([this] {
+        std::lock_guard control_lock(control_mutex_);
         if (mortar_auto_aim_) mortar_auto_aim_->shutdown();
+    });
+    shutdown.runMandatory([this] {
+        std::lock_guard control_lock(control_mutex_);
         if (throwables_) throwables_->shutdown();
+    });
+    shutdown.runMandatory([this] {
+        std::lock_guard control_lock(control_mutex_);
         if (c4_) c4_->setEnabled(false);
+    });
+    shutdown.runMandatory([this] {
+        std::lock_guard control_lock(control_mutex_);
         if (special_) special_->shutdown();
+    });
+    shutdown.runMandatory([this] {
+        std::lock_guard control_lock(control_mutex_);
         if (c4_) c4_->shutdown();
+    });
+    if (mouse_motion_dispatcher_) {
+        shutdown.runMandatory([this] { mouse_motion_dispatcher_->shutdown(); });
+    }
+    if (!shutdown.succeeded()) {
+        // Releasing App state after an unproven join would permit callbacks to
+        // touch destroyed dependencies. This invariant failure is not safely
+        // recoverable at the orchestration layer.
+        std::terminate();
+    }
+    {
+        std::lock_guard lock(state_mutex_);
+        runtime_shutdown_.markStopped();
     }
     PUBG_HEAP_PROBE("shutdown.afterStop");
 }
@@ -501,16 +621,23 @@ void App::prepareForUiClose() {
     stopRuntimeForShutdown();
 }
 
-void App::shutdown() {
+void App::shutdown() noexcept {
+    requireOwnerThread();
     stopRuntimeForShutdown();
     {
         std::lock_guard lock(state_mutex_);
+        if (!runtime_shutdown_.stopped()) {
+            // A same-thread re-entrant call during mandatory quiescence must
+            // not release dependencies owned by the outer stop sequence.
+            return;
+        }
         if (resources_released_) {
             return;
         }
         resources_released_ = true;
     }
 
+    ai_aim_.reset();
     status_hud_.reset();
     c4_.reset();
     throwables_.reset();
@@ -520,6 +647,7 @@ void App::shutdown() {
     large_map_.reset();
     map_points_.reset();
     recoil_.reset();
+    mouse_motion_dispatcher_.reset();
     gesture_identifier_.reset();
     equipment_detector_.reset();
     weapon_detector_.reset();
@@ -567,39 +695,52 @@ HotkeyManager::HotkeyCombo App::hotkeyCombo(const std::string& name, const std::
 }
 
 void App::migrateLegacyDefaultHotkeys() {
-    std::vector<std::tuple<std::string, std::vector<std::string>, std::string>> migrations{
-        {"toggle_weapon_detection", {"<f2>"}, "<f1>"},
-        {"toggle_display", {"<ctrl>+<shift>+<space>"}, "<f2>"},
-        {"toggle_recoil", {"<ctrl>+<shift>+<tab>"}, "<f3>"},
-        {"measure_map", {"<f1>", "<ctrl>+<shift>+m"}, "<f4>"},
-        {"mortar_auto_aim", {"<f6>"}, "mouse_right"},
-    };
     bool changed = false;
     config_.write([&](Json& data) {
         if (!data.contains("hotkeys") || !data["hotkeys"].is_object()) {
-            return;
-        }
-        if (!data["hotkeys"].contains("sprint_key") || !data["hotkeys"]["sprint_key"].is_string()) {
-            data["hotkeys"]["sprint_key"] = "shift";
+            data["hotkeys"] = Json::object();
             changed = true;
         }
-        for (const auto& [action, old_values, next] : migrations) {
-            if (!data["hotkeys"].contains(action) || !data["hotkeys"][action].is_string()) {
+        auto& hotkeys = data["hotkeys"];
+
+        HotkeyStringMap current_hotkeys;
+        for (auto it = hotkeys.begin(); it != hotkeys.end(); ++it) {
+            if (it.value().is_string()) {
+                current_hotkeys.emplace(it.key(), it.value().get<std::string>());
+            }
+        }
+        const auto configured = withAvailablePrimaryHotkeyDefaults(current_hotkeys);
+        for (const auto& binding : kPrimaryHotkeyDefaults) {
+            const std::string action(binding.action);
+            const auto planned = configured.find(binding.action);
+            if (planned == configured.end()) {
                 continue;
             }
-            const std::string current = data["hotkeys"][action].get<std::string>();
-            if (std::find(old_values.begin(), old_values.end(), current) != old_values.end()) {
-                data["hotkeys"][action] = next;
+            const auto current = hotkeys.find(action);
+            if (current == hotkeys.end() || !current->is_string() ||
+                current->get<std::string>() != planned->second) {
+                hotkeys[action] = planned->second;
                 changed = true;
             }
         }
-        auto& hotkeys = data["hotkeys"];
+
+        if (!hotkeys.contains("sprint_key") || !hotkeys["sprint_key"].is_string()) {
+            hotkeys["sprint_key"] = "shift";
+            changed = true;
+        }
         if (!hotkeys.contains("toggle_window") || !hotkeys["toggle_window"].is_string()) {
             hotkeys["toggle_window"] = "<home>";
             changed = true;
         }
         if (!hotkeys.contains("mortar_auto_aim") || !hotkeys["mortar_auto_aim"].is_string()) {
             hotkeys["mortar_auto_aim"] = "mouse_right";
+            changed = true;
+        } else if (hotkeys["mortar_auto_aim"].get<std::string>() == "<f6>") {
+            hotkeys["mortar_auto_aim"] = "mouse_right";
+            changed = true;
+        }
+        if (!hotkeys.contains("ai_aim_hold") || !hotkeys["ai_aim_hold"].is_string()) {
+            hotkeys["ai_aim_hold"] = "mouse_right";
             changed = true;
         }
         if (!hotkeys.contains("game_minimap") || !hotkeys["game_minimap"].is_string()) {
@@ -614,7 +755,13 @@ void App::migrateLegacyDefaultHotkeys() {
             hotkeys["open_large_map"] = "m";
             changed = true;
         }
-        if (hotkeys.value("fire_key", std::string("end")) == hotkeys.value("toggle_window", std::string("<home>"))) {
+        auto hotkeyOr = [&](const char* action, const char* fallback) {
+            const auto value = hotkeys.find(action);
+            return value != hotkeys.end() && value->is_string()
+                ? value->get<std::string>()
+                : std::string(fallback);
+        };
+        if (hotkeyOr("fire_key", "end") == hotkeyOr("toggle_window", "<home>")) {
             hotkeys["fire_key"] = "end";
             hotkeys["toggle_window"] = "<home>";
             changed = true;
@@ -650,6 +797,8 @@ void App::loadUiState() {
         weapon_detection_enabled_ = switches.value("weapon_detection", true);
         display_enabled_ = switches.value("display", false);
         recoil_enabled_ = switches.value("recoil", false);
+        // AI 瞄准每次进程启动均要求用户重新手动开启，不恢复上次运行态。
+        ai_aim_enabled_ = false;
         if (ui.contains("current_marker_color") && ui["current_marker_color"].is_string()) {
             current_marker_color_ = ui["current_marker_color"].get<std::string>();
         }
@@ -684,13 +833,26 @@ void App::saveSwitchState(const std::string& key, bool enabled) {
 }
 
 void App::setWeaponDetectionEnabled(bool enabled) {
+    if (!enabled) {
+        const bool disable_ai = [this] {
+            std::lock_guard lock(state_mutex_);
+            return ai_aim_enabled_;
+        }();
+        if (disable_ai) {
+            setAiAimEnabled(false);
+        }
+    }
     std::lock_guard control_lock(control_mutex_);
     {
         std::lock_guard lock(state_mutex_);
         weapon_detection_enabled_ = enabled;
     }
-    if (main_window_) {
-        QMetaObject::invokeMethod(main_window_, [this, enabled] { main_window_->setWeaponDetectionState(enabled); }, Qt::QueuedConnection);
+    if (auto* window = main_window_.load(std::memory_order_acquire)) {
+        QMetaObject::invokeMethod(window, [this, enabled] {
+            if (auto* current = main_window_.load(std::memory_order_acquire)) {
+                current->setWeaponDetectionState(enabled);
+            }
+        }, Qt::QueuedConnection);
     }
     saveSwitchState("weapon_detection", enabled);
     weapon_detector_->setEnabled(enabled);
@@ -714,8 +876,12 @@ void App::setDisplayEnabled(bool enabled) {
             special_display_active_ = false;
         }
     }
-    if (main_window_) {
-        QMetaObject::invokeMethod(main_window_, [this, enabled] { main_window_->setDisplayState(enabled); }, Qt::QueuedConnection);
+    if (auto* window = main_window_.load(std::memory_order_acquire)) {
+        QMetaObject::invokeMethod(window, [this, enabled] {
+            if (auto* current = main_window_.load(std::memory_order_acquire)) {
+                current->setDisplayState(enabled);
+            }
+        }, Qt::QueuedConnection);
     }
     saveSwitchState("display", enabled);
     if (!enabled) {
@@ -741,8 +907,12 @@ void App::setRecoilEnabled(bool enabled) {
         recoil_enabled_ = enabled;
         current_weapon = current_weapon_;
     }
-    if (main_window_) {
-        QMetaObject::invokeMethod(main_window_, [this, enabled] { main_window_->setRecoilState(enabled); }, Qt::QueuedConnection);
+    if (auto* window = main_window_.load(std::memory_order_acquire)) {
+        QMetaObject::invokeMethod(window, [this, enabled] {
+            if (auto* current = main_window_.load(std::memory_order_acquire)) {
+                current->setRecoilState(enabled);
+            }
+        }, Qt::QueuedConnection);
     }
     saveSwitchState("recoil", enabled);
     recoil_->setEnabled(enabled);
@@ -752,6 +922,67 @@ void App::setRecoilEnabled(bool enabled) {
         recoil_->updateCurrentWeapon(current_weapon);
         syncRecoilAttachmentsForCurrentWeapon();
     }
+    updateStatusHud();
+    printStatus();
+}
+
+void App::setAiAimEnabled(bool enabled) {
+#if !PUBG_ENABLE_INPUT_CONTROL
+    enabled = false;
+#endif
+    if (enabled) {
+        const bool recognition_enabled = [this] {
+            std::lock_guard lock(state_mutex_);
+            return weapon_detection_enabled_;
+        }();
+        if (!recognition_enabled) {
+            setWeaponDetectionEnabled(true);
+        }
+    }
+
+    std::lock_guard control_lock(control_mutex_);
+    std::lock_guard status_lock(ai_aim_status_mutex_);
+    bool session_changed = false;
+    std::uint64_t session_revision = 0;
+    {
+        std::lock_guard lock(state_mutex_);
+        session_changed = ai_aim_enabled_ != enabled;
+        if (session_changed) {
+            ++ai_aim_session_revision_;
+        }
+        session_revision = ai_aim_session_revision_;
+        ai_aim_enabled_ = enabled;
+        if (!enabled) {
+            ai_aim_hold_pressed_ = false;
+            ai_aim_runtime_error_.clear();
+        }
+    }
+    if (session_changed && status_hud_) {
+        status_hud_->clearTemporaryMessageWithPrefix("AI瞄准");
+    }
+    if (auto* window = main_window_.load(std::memory_order_acquire)) {
+        QMetaObject::invokeMethod(window, [this, enabled, session_revision] {
+            bool current = false;
+            {
+                std::lock_guard lock(state_mutex_);
+                current = ai_aim_session_revision_ == session_revision &&
+                          ai_aim_enabled_ == enabled;
+            }
+            if (current) {
+                if (auto* main_window = main_window_.load(std::memory_order_acquire)) {
+                    main_window->setAiAimState(enabled);
+                }
+            }
+        }, Qt::QueuedConnection);
+    }
+
+    // 运行态不持久化为 true；下次启动仍要求用户主动确认。
+    saveSwitchState("ai_aim", false);
+    if (ai_aim_) {
+        ai_aim_->setEnabled(enabled);
+    }
+    publishAiCombatContext();
+    publishAiActivation(hotkeys_.isGameForeground());
     updateStatusHud();
     printStatus();
 }
@@ -778,6 +1009,14 @@ void App::toggleRecoil() {
         return !recoil_enabled_;
     }();
     setRecoilEnabled(next);
+}
+
+void App::toggleAiAim() {
+    const bool next = [this] {
+        std::lock_guard lock(state_mutex_);
+        return !ai_aim_enabled_;
+    }();
+    setAiAimEnabled(next);
 }
 
 void App::cycleMarkerColor(int direction) {
@@ -860,6 +1099,8 @@ void App::applyWeaponUpdate(const std::string& weapon, double score) {
         status_hud_->setCurrentWeapon(weapon);
         status_hud_->setPeekDirection(recoil_->sgPeekDirection(), recoil_->shouldShowSgPeekDirection());
     }
+    publishAiCombatContext();
+    publishAiActivation(hotkeys_.isGameForeground());
     std::cout << "[weapon] " << (weapon.empty() ? "(none)" : weapon) << " score=" << score << "\n";
 }
 
@@ -892,12 +1133,11 @@ void App::updateEquipment(const std::map<int, WeaponSlotInfo>& equipment_slots) 
     if (has_current_weapon) {
         syncRecoilAttachmentsForCurrentWeapon();
     }
+    publishAiCombatContext();
 }
 
 bool App::isRecoilWeapon(const std::string& weapon) const {
-    return !weapon.empty() && weapon != "Rocket" && weapon != "Grenade" &&
-           weapon != "VSS" && weapon != "Crossbow" && weapon != "C4" &&
-           weapon != "Mortar";
+    return !weapon.empty() && !shouldAutoUseMinimapForWeapon(weapon);
 }
 
 void App::syncRecoilAttachmentsForCurrentWeapon() {
@@ -911,18 +1151,9 @@ void App::syncRecoilAttachmentsForCurrentWeapon() {
     if (!isRecoilWeapon(current_weapon)) {
         return;
     }
-    const auto slot1 = equipment.find(1);
-    const auto slot2 = equipment.find(2);
-    if (slot1 != equipment.end() && slot2 != equipment.end() &&
-        slot1->second.name == current_weapon && slot2->second.name == current_weapon) {
-        recoil_->updateAttachments(slot2->second);
-        return;
-    }
-    for (const auto& [_, info] : equipment) {
-        if (info.name == current_weapon) {
-            recoil_->updateAttachments(info);
-            return;
-        }
+    if (const auto matched = recognizedEquipmentForWeapon(
+            equipment, current_weapon)) {
+        recoil_->updateAttachments(*matched);
     }
 }
 
@@ -985,7 +1216,16 @@ void App::toggleGameMinimap() {
 
 bool App::gameMenuInputSuppressed() const {
     std::lock_guard lock(state_mutex_);
-    return game_menu_active_ || nowSeconds() < game_menu_input_suppress_until_;
+    return game_menu_state_.active() || nowSeconds() < game_menu_input_suppress_until_;
+}
+
+GameMenuStateTracker::KnownUiState App::knownGameUiStateLocked() const noexcept {
+    return {
+        equipment_ui_open_,
+        large_map_open_,
+        manual_game_minimap_open_,
+        game_minimap_opened_by_app_,
+    };
 }
 
 bool App::shouldHoldMortarStateAfterEsc() const {
@@ -1009,7 +1249,7 @@ void App::closeGameMinimapForAssist() {
     bool should_toggle = false;
     {
         std::lock_guard lock(state_mutex_);
-        if (game_menu_active_ || nowSeconds() < game_menu_input_suppress_until_) {
+        if (game_menu_state_.active() || nowSeconds() < game_menu_input_suppress_until_) {
             return;
         }
         should_toggle = game_minimap_opened_by_app_;
@@ -1030,6 +1270,7 @@ void App::handleManualGameMinimapToggle(bool pressed) {
     std::string current_weapon;
     {
         std::lock_guard lock(state_mutex_);
+        manual_game_minimap_open_ = !manual_game_minimap_open_;
         const double now = nowSeconds();
         if (manual_minimap_toggle_ignore_until_ > 0.0 && now < manual_minimap_toggle_ignore_until_) {
             // A quick second press of the in-game minimap key should leave the
@@ -1081,20 +1322,41 @@ void App::handleManualGameMinimapToggle(bool pressed) {
         updateAssistantRouting();
         updateStatusHud();
     }
+    publishAiActivation(hotkeys_.isGameForeground());
 }
 
 void App::handleEscapeKey(bool pressed) {
     if (pressed) {
+        bool should_close_assist_display = false;
+        bool should_resume_weapon_detection = false;
         {
             std::lock_guard lock(state_mutex_);
-            game_menu_active_ = true;
+            const auto transition =
+                game_menu_state_.onEscapePressed(knownGameUiStateLocked());
+            if (transition.close_app_minimap) {
+                game_minimap_opened_by_app_ = false;
+                manual_special_display_suppressed_ = true;
+                manual_minimap_toggle_ignore_until_ = 0.0;
+                should_close_assist_display = special_display_active_;
+                should_resume_weapon_detection =
+                    weapon_detection_enabled_ && current_weapon_ != "Mortar";
+            }
+            large_map_open_ = false;
+            manual_game_minimap_open_ = false;
+        }
+        if (should_close_assist_display) {
+            setSpecialDisplayActive(false);
+            if (should_resume_weapon_detection) {
+                weapon_detector_->setEnabled(true);
+            }
+            updateStatusHud();
         }
         holdMortarStateForBlockingUi();
     } else {
         std::lock_guard lock(state_mutex_);
-        game_menu_active_ = false;
         game_menu_input_suppress_until_ = nowSeconds() + 0.45;
     }
+    publishAiActivation(hotkeys_.isGameForeground());
 }
 
 void App::holdMortarStateForBlockingUi() {
@@ -1112,7 +1374,7 @@ void App::holdMortarStateForBlockingUi() {
 void App::handleMeasureMapHotkey() {
     const bool display_enabled = [this] {
         std::lock_guard lock(state_mutex_);
-        if (shutting_down_) {
+        if (shutting_down_.load(std::memory_order_acquire)) {
             return false;
         }
         return display_enabled_;
@@ -1141,7 +1403,7 @@ void App::setSpecialDisplayActive(bool active) {
     bool changed = false;
     {
         std::lock_guard lock(state_mutex_);
-        if (shutting_down_ && active) {
+        if (shutting_down_.load(std::memory_order_acquire) && active) {
             return;
         }
         changed = special_display_active_ != active;
@@ -1233,7 +1495,7 @@ void App::handleMortarInteractKey(bool pressed) {
     bool special_display_active = false;
     {
         std::lock_guard lock(state_mutex_);
-        if (shutting_down_) {
+        if (shutting_down_.load(std::memory_order_acquire)) {
             return;
         }
         display_enabled = display_enabled_;
@@ -1316,7 +1578,8 @@ void App::startMortarMountConfirmation() {
                     std::lock_guard lock(state_mutex_);
                     display_enabled = display_enabled_;
                     mortar_allowed = assistant_enabled_["mortar"];
-                    menu_suppressed = game_menu_active_ || nowSeconds() < game_menu_input_suppress_until_;
+                    menu_suppressed = game_menu_state_.active() ||
+                                      nowSeconds() < game_menu_input_suppress_until_;
                     hold_after_esc = hold_mortar_until_reacquired_;
                 }
                 if (!display_enabled || !mortar_allowed || !mortar_mount_detector_) {
@@ -1423,6 +1686,8 @@ void App::applyMortarMounted(bool mounted) {
         }
     }
     updateAssistantRouting();
+    publishAiCombatContext();
+    publishAiActivation(hotkeys_.isGameForeground());
 }
 
 void App::joinMortarMountWorker() {
@@ -1499,6 +1764,298 @@ void App::updateAssistantRouting() {
     }
 }
 
+bool App::isAiAimWeapon(const std::string& weapon) const {
+    if (weapon == "VSS") {
+        return true;
+    }
+    if (!isRecoilWeapon(weapon)) {
+        return false;
+    }
+    return recoil_ && recoil_->supportsWeapon(weapon);
+}
+
+bool App::applyAiAimSettings(const AiAimSettings& settings, std::string& error) {
+    requireOwnerThread();
+    std::lock_guard control_lock(control_mutex_);
+    std::lock_guard status_lock(ai_aim_status_mutex_);
+    if (!settings.valid() || shutting_down_.load(std::memory_order_acquire) || !ai_aim_) {
+        error = settings.valid() ? "程序正在关闭或 AI 模块不可用" : settings.validation_error;
+        return false;
+    }
+    // Context/activation publishers use the same status lock, so no stale host
+    // activation can reopen output between algorithm and high-zoom policy updates.
+    ai_aim_->updateActivation({});
+    try {
+        if (!applyProductionAiAimSettings(*ai_aim_, paths_, ai_aim_settings_, settings, *regions_)) {
+            error = "AI 模块正在关闭";
+            return false;
+        }
+        {
+            std::lock_guard lock(state_mutex_);
+            ai_aim_settings_ = settings;
+            ++ai_aim_session_revision_;
+            ai_aim_runtime_error_.clear();
+            if (status_hud_) {
+                status_hud_->setAiSnapshot({}, settings.display.target_boxes,
+                    settings.algorithm.tracking.max_frame_age_ms);
+            }
+        }
+        publishAiCombatContext();
+        publishAiActivation(hotkeys_.isGameForeground());
+    } catch (const std::exception& exception) {
+        error = exception.what();
+        return false; // Output remains fail-closed until the host refreshes state.
+    }
+    return true;
+}
+
+void App::publishAiCombatContext() {
+    std::lock_guard status_lock(ai_aim_status_mutex_);
+    if (!ai_aim_) {
+        return;
+    }
+
+    AiAimHostCombatSnapshot host;
+    std::uint64_t source_revision = 0;
+    {
+        std::lock_guard lock(state_mutex_);
+        host.weapon = current_weapon_;
+        host.stance = current_stance_;
+        host.equipment = equipment_;
+        host.firing = left_pressed_;
+        host.ads = right_pressed_;
+        host.lean_left = lean_left_pressed_;
+        host.lean_right = lean_right_pressed_;
+        ai_context_valid_ = false;
+        source_revision = ++ai_context_source_revision_;
+    }
+
+    host.weapon_supported = isAiAimWeapon(host.weapon);
+    host.disable_variable_high_zoom = !ai_aim_settings_.valid() ||
+        ai_aim_settings_.activation.disable_variable_high_zoom;
+    auto context = buildAiAimCombatContext(host);
+    const bool context_valid = !context.weapon.empty();
+    ai_aim_->updateCombatContext(std::move(context), source_revision);
+    {
+        std::lock_guard lock(state_mutex_);
+        if (source_revision == ai_context_source_revision_) {
+            ai_context_valid_ = context_valid;
+        }
+    }
+}
+
+void App::publishAiActivation(bool game_foreground) {
+    std::lock_guard status_lock(ai_aim_status_mutex_);
+    if (!ai_aim_) {
+        return;
+    }
+
+    bool enabled = false;
+    bool aim_hold = false;
+    bool blocking_ui = false;
+    bool paused = false;
+    bool context_valid = false;
+    std::string weapon;
+    {
+        std::lock_guard lock(state_mutex_);
+        enabled = ai_aim_enabled_ && !shutting_down_.load(std::memory_order_acquire);
+        aim_hold = ai_aim_hold_pressed_;
+        weapon = current_weapon_;
+        blocking_ui = equipment_ui_open_ || large_map_open_ ||
+                      game_menu_state_.aimInputBlocked() ||
+                      manual_game_minimap_open_ || game_minimap_opened_by_app_ ||
+                      nowSeconds() < game_menu_input_suppress_until_;
+        paused = shutting_down_.load(std::memory_order_acquire) || mortar_mounted_;
+        context_valid = ai_context_valid_;
+    }
+    paused = paused || !isAiAimWeapon(weapon) || !context_valid;
+
+    pubg::ai_aim::ActivationState activation;
+    activation.enabled = enabled;
+    activation.aim_primary = aim_hold;
+    activation.paused = paused;
+    activation.game_foreground = game_foreground;
+    activation.blocking_ui_open = blocking_ui;
+    ai_aim_->updateActivation(activation);
+}
+
+void App::startAiStateMonitor() {
+    if (ai_state_worker_.joinable()) {
+        return;
+    }
+    ai_state_worker_ = std::jthread([this](std::stop_token stop) {
+        AiAimRuntimeErrorTracker error_tracker;
+        while (!stop.stop_requested()) {
+            const bool game_foreground = hotkeys_.isGameForeground();
+            const auto cursor_visibility = InputController::cursorVisibility();
+            {
+                std::lock_guard lock(state_mutex_);
+                (void)game_menu_state_.observeCursorVisibility(
+                    cursor_visibility,
+                    knownGameUiStateLocked(),
+                    game_foreground,
+                    nowSeconds() >= game_menu_input_suppress_until_);
+            }
+            publishAiActivation(game_foreground);
+
+            bool enabled = false;
+            std::uint64_t observed_session = 0;
+            {
+                std::lock_guard lock(state_mutex_);
+                enabled = ai_aim_enabled_ && !shutting_down_.load(std::memory_order_acquire);
+                observed_session = ai_aim_session_revision_;
+            }
+            if (enabled && ai_aim_) {
+                const auto snapshot = ai_aim_->snapshot();
+                AiAimRuntimeErrorTransition transition;
+                bool sample_accepted = false;
+                {
+                    std::lock_guard lock(state_mutex_);
+                    sample_accepted = shouldAcceptAiAimRuntimeSample(
+                        ai_aim_enabled_ && !shutting_down_.load(std::memory_order_acquire),
+                        observed_session,
+                        ai_aim_session_revision_);
+                    if (sample_accepted) {
+                        if (status_hud_) {
+                            status_hud_->setAiSnapshot(snapshot,
+                                ai_aim_settings_.display.target_boxes,
+                                ai_aim_settings_.algorithm.tracking.max_frame_age_ms);
+                        }
+                        transition = error_tracker.observe(
+                            snapshot.last_error,
+                            observed_session);
+                        if (transition.changed) {
+                            ai_aim_runtime_error_ = transition.active_error;
+                        }
+                    }
+                }
+                if (!sample_accepted) {
+                    error_tracker.reset();
+                } else if (transition.changed) {
+                    updateStatusHud();
+                    if (!transition.active_error.empty() && status_hud_) {
+                        // Hold the App state lock across the final session check
+                        // and message write. A concurrent disable then clears the
+                        // module-owned message after invalidating this session.
+                        std::lock_guard lock(state_mutex_);
+                        if (shouldAcceptAiAimRuntimeSample(
+                                ai_aim_enabled_ && !shutting_down_.load(std::memory_order_acquire),
+                                observed_session,
+                                ai_aim_session_revision_)) {
+                            status_hud_->showTemporaryMessage(
+                                "AI瞄准错误: " + transition.active_error,
+                                2500,
+                                "#EF4444");
+                        }
+                    }
+                }
+            } else {
+                error_tracker.reset();
+                bool cleared = false;
+                {
+                    std::lock_guard lock(state_mutex_);
+                    cleared = !ai_aim_runtime_error_.empty();
+                    ai_aim_runtime_error_.clear();
+                    if (status_hud_) {
+                        status_hud_->setAiSnapshot({}, ai_aim_settings_.display.target_boxes,
+                            ai_aim_settings_.algorithm.tracking.max_frame_age_ms);
+                    }
+                }
+                if (cleared) {
+                    updateStatusHud();
+                }
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
+    });
+}
+
+void App::stopAiStateMonitor() {
+    if (!ai_state_worker_.joinable()) {
+        return;
+    }
+    ai_state_worker_.request_stop();
+    ai_state_worker_.join();
+}
+
+void App::handleAiAimStatus(const AiAimRuntimeStatus& status) {
+    std::lock_guard status_lock(ai_aim_status_mutex_);
+    if (!ai_aim_) {
+        return;
+    }
+    const auto current_status = ai_aim_->status();
+    if (current_status.lifecycle_generation != status.lifecycle_generation ||
+        current_status.revision != status.revision) {
+        return;
+    }
+
+    const bool rollback = status.state == AiAimRuntimeState::Error;
+    bool show_warning = false;
+    std::uint64_t message_session = 0;
+    {
+        std::lock_guard lock(state_mutex_);
+        if (status.state != AiAimRuntimeState::Off && !ai_aim_enabled_) {
+            return;
+        }
+        show_warning = !status.warning.empty() &&
+                       status.warning != ai_aim_status_.warning;
+        ai_aim_status_ = status;
+        if (rollback) {
+            if (ai_aim_enabled_) {
+                ++ai_aim_session_revision_;
+            }
+            ai_aim_enabled_ = false;
+            ai_aim_hold_pressed_ = false;
+            ai_aim_runtime_error_.clear();
+        } else if (status.state == AiAimRuntimeState::Off) {
+            ai_aim_runtime_error_.clear();
+        }
+        message_session = ai_aim_session_revision_;
+    }
+    if (rollback) {
+        auto* window = main_window_.load(std::memory_order_acquire);
+        if (window) {
+            QMetaObject::invokeMethod(window, [this, message_session] {
+                bool current = false;
+                {
+                    std::lock_guard lock(state_mutex_);
+                    current = ai_aim_session_revision_ == message_session &&
+                              !ai_aim_enabled_;
+                }
+                if (current) {
+                    if (auto* main_window = main_window_.load(std::memory_order_acquire)) {
+                        main_window->setAiAimState(false);
+                    }
+                }
+            }, Qt::QueuedConnection);
+        }
+    }
+    updateStatusHud();
+    if (!status_hud_ || (!rollback && !show_warning)) {
+        return;
+    }
+
+    // The switch path uses the same recursive lifecycle lock and clears an
+    // owned message after changing sessions. Holding state_mutex_ through the
+    // final check + write makes the ordering deterministic.
+    std::lock_guard lock(state_mutex_);
+    const bool expected_enabled = !rollback;
+    const auto latest_status = ai_aim_->status();
+    if (ai_aim_session_revision_ != message_session ||
+        ai_aim_enabled_ != expected_enabled ||
+        latest_status.lifecycle_generation != status.lifecycle_generation ||
+        latest_status.revision != status.revision) {
+        return;
+    }
+    if (rollback) {
+        status_hud_->showTemporaryMessage(
+            "AI瞄准加载失败: " + status.detail, 3000, "#EF4444");
+    } else {
+        status_hud_->showTemporaryMessage(
+            "AI瞄准提示: " + status.warning, 3500, "#F59E0B");
+    }
+}
+
 void App::updateStatusHud() {
     if (!status_hud_) {
         return;
@@ -1506,6 +2063,7 @@ void App::updateStatusHud() {
     bool weapon_detection = false;
     bool display = false;
     bool recoil = false;
+    bool ai_aim = false;
     std::string current_weapon;
     std::string current_stance;
     {
@@ -1513,10 +2071,11 @@ void App::updateStatusHud() {
         weapon_detection = weapon_detection_enabled_;
         display = display_enabled_;
         recoil = recoil_enabled_;
+        ai_aim = ai_aim_enabled_;
         current_weapon = current_weapon_;
         current_stance = current_stance_;
     }
-    status_hud_->setSwitches(weapon_detection, display, recoil);
+    status_hud_->setSwitches(weapon_detection, display, recoil, ai_aim);
     status_hud_->setCurrentWeapon(current_weapon);
     status_hud_->setStance(current_stance);
     status_hud_->setPeekDirection(recoil_ ? recoil_->sgPeekDirection() : 0,
@@ -1611,20 +2170,24 @@ void App::printStatus() const {
     bool weapon_detection = false;
     bool display = false;
     bool recoil = false;
+    bool ai_aim = false;
     {
         std::lock_guard lock(state_mutex_);
         weapon_detection = weapon_detection_enabled_;
         display = display_enabled_;
         recoil = recoil_enabled_;
+        ai_aim = ai_aim_enabled_;
     }
     std::cout << "[status] weapon_detection=" << weapon_detection
               << " display=" << display
-              << " recoil=" << recoil << "\n";
+              << " recoil=" << recoil
+              << " ai_aim=" << ai_aim << "\n";
 }
 
 int App::run() {
+    requireOwnerThread();
     std::cout << "PUBGAssistant C++ port started.\n";
-    std::cout << "F1 weapon detection, F2 display, F3 recoil, configured equipment scan key.\n";
+    std::cout << "Default hotkeys: F1 weapon detection, F2 distance display, F3 recoil, F4 AI aim, F5 large-map measurement; all are configurable.\n";
     PUBG_HEAP_PROBE("run.start");
     syncMarkerColorsFromConfig();
     bool initial_weapon_detection = false;
@@ -1639,6 +2202,7 @@ int App::run() {
     setWeaponDetectionEnabled(initial_weapon_detection);
     setDisplayEnabled(initial_display);
     setRecoilEnabled(initial_recoil);
+    setAiAimEnabled(false);
     {
         std::string current_weapon;
         {
@@ -1653,9 +2217,15 @@ int App::run() {
     callbacks.set_weapon_detection = [this](bool enabled) { setWeaponDetectionEnabled(enabled); };
     callbacks.set_display = [this](bool enabled) { setDisplayEnabled(enabled); };
     callbacks.set_recoil = [this](bool enabled) { setRecoilEnabled(enabled); };
+    callbacks.set_ai_aim = [this](bool enabled) { setAiAimEnabled(enabled); };
+    callbacks.apply_ai_aim_settings = [this](const AiAimSettings& settings, std::string& error) {
+        return applyAiAimSettings(settings, error);
+    };
     callbacks.set_assistant = [this](const std::string& key, bool enabled) { setAssistantEnabled(key, enabled); };
     callbacks.sync_marker_colors = [this] { syncMarkerColorsFromConfig(); };
-    callbacks.refresh_status_hud = [this] { updateStatusHud(); };
+    // Display edits change presentation only. Existing recognition state is already
+    // in the HUD; refreshing five state setters would redraw the full overlay five times.
+    callbacks.refresh_status_hud = [this] { if (status_hud_) status_hud_->render(); };
     callbacks.reload_hotkeys = [this] { reloadHotkeys(); };
     callbacks.prepare_for_close = [this] { prepareForUiClose(); };
     int code = 0;
@@ -1663,12 +2233,18 @@ int App::run() {
         pubg::ui::MainWindow window(config_, *regions_, *minimap_, *elevation_, *weapon_detector_,
                                     *equipment_detector_, *gesture_identifier_, *recoil_, *special_,
                                     *map_points_, *large_map_, *throwables_, *c4_, std::move(callbacks));
-        main_window_ = &window;
+        main_window_.store(&window, std::memory_order_release);
+        auto window_lifetime = ScopeExit([this]() noexcept {
+            // Keep the QObject alive until every producer that can queue work to
+            // it has stopped. This also covers partial hotkey startup failures.
+            stopRuntimeForShutdown();
+            main_window_.store(nullptr, std::memory_order_release);
+        });
         window.move(regions_->qtScreenLeft(), regions_->qtScreenTop());
         window.show();
         hotkeys_.start();
+        startAiStateMonitor();
         code = QApplication::exec();
-        main_window_ = nullptr;
         PUBG_HEAP_PROBE("run.afterExec");
     }
     PUBG_HEAP_PROBE("run.afterWindowDestroyed");

@@ -15,6 +15,8 @@ public:
     [[nodiscard]] std::filesystem::path mapDataFile() const;
     [[nodiscard]] std::filesystem::path recoilSettingsFile() const;
     [[nodiscard]] std::filesystem::path specialAssistantsFile() const;
+    [[nodiscard]] std::filesystem::path aiAimSettingsFile() const;
+    [[nodiscard]] std::filesystem::path aiAimRuntimeDir() const;
     [[nodiscard]] std::filesystem::path regionConfigDir() const;
     [[nodiscard]] std::pair<int, int> normalizeRegionResolution(int width, int height) const;
     [[nodiscard]] std::filesystem::path regionConfigFile(int width, int height) const;

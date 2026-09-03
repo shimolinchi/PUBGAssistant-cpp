@@ -1,0 +1,5 @@
+@PACKAGE_INIT@
+
+include("${CMAKE_CURRENT_LIST_DIR}/pubg_ai_aimTargets.cmake")
+
+check_required_components(pubg_ai_aim)

@@ -1,5 +1,8 @@
 #include "ui/MainWindow.hpp"
 
+#include "PrimaryHotkeys.hpp"
+#include "ui/AiAimSettingsWindow.hpp"
+
 #include <QGridLayout>
 #include <QGuiApplication>
 #include <QHBoxLayout>
@@ -588,7 +591,7 @@ void MainWindow::setDisplayState(bool enabled) {
     display_enabled_ = enabled;
     if (btn_display_) {
         btn_display_->setActive(enabled);
-        btn_display_->setText(enabled ? QStringLiteral("关闭瞄准辅助") : QStringLiteral("开启瞄准辅助"));
+        btn_display_->setText(enabled ? QStringLiteral("关闭测距辅助") : QStringLiteral("开启测距辅助"));
     }
 }
 
@@ -597,6 +600,14 @@ void MainWindow::setRecoilState(bool enabled) {
     if (btn_recoil_) {
         btn_recoil_->setActive(enabled);
         btn_recoil_->setText(enabled ? QStringLiteral("关闭辅助压枪") : QStringLiteral("开启辅助压枪"));
+    }
+}
+
+void MainWindow::setAiAimState(bool enabled) {
+    ai_aim_enabled_ = enabled;
+    if (btn_ai_aim_) {
+        btn_ai_aim_->setActive(enabled);
+        btn_ai_aim_->setText(enabled ? QStringLiteral("关闭AI瞄准") : QStringLiteral("开启AI瞄准"));
     }
 }
 
@@ -691,30 +702,35 @@ void MainWindow::buildMapTab(QWidget* tab) {
 }
 void MainWindow::buildLaunchTab(QWidget* tab) {
     tab->setFixedSize(262, 299);
-    int button_y = 3;
-    auto addBtn = [&](const QString& text, auto slot) {
+    int core_button_index = 0;
+    auto addCoreButton = [&](const QString& text, auto slot) {
         auto* b = new RoundedButton(text, tab);
-        b->configure(256, 28, 12, 14);
+        b->configure(126, 28, 12, 13);
         b->setToggleMode(true);
-        b->setGeometry(3, button_y, 256, 28);
-        button_y += 33;
+        const int column = core_button_index % 2;
+        const int row = core_button_index / 2;
+        b->setGeometry(3 + column * 130, 3 + row * 33, 126, 28);
+        ++core_button_index;
         connect(b, &QPushButton::clicked, this, slot);
         return b;
     };
-    btn_weapon_detect_ = addBtn(QStringLiteral("关闭武器检测"), [this] { toggleWeaponDetection(); });
+    btn_weapon_detect_ = addCoreButton(QStringLiteral("关闭武器检测"), [this] { toggleWeaponDetection(); });
     btn_weapon_detect_->setActive(true);
-    btn_display_ = addBtn(QStringLiteral("开启瞄准辅助"), [this] { toggleDisplay(); });
-    btn_recoil_ = addBtn(QStringLiteral("开启辅助压枪"), [this] { toggleRecoil(); });
+    btn_display_ = addCoreButton(QStringLiteral("开启测距辅助"), [this] { toggleDisplay(); });
+    btn_recoil_ = addCoreButton(QStringLiteral("开启辅助压枪"), [this] { toggleRecoil(); });
+    btn_ai_aim_ = addCoreButton(QStringLiteral("开启AI瞄准"), [this] { toggleAiAim(); });
     const auto switch_state = config_.read([](const Json& data) {
         return data.value("ui_state", Json::object()).value("switches", Json::object());
     });
     setWeaponDetectionState(switch_state.value("weapon_detection", true));
     setDisplayState(switch_state.value("display", false));
     setRecoilState(switch_state.value("recoil", false));
+    // AI 瞄准属于主动输入控制；每次启动都要求用户重新手动开启。
+    setAiAimState(false);
 
     auto* lab = new QLabel(QStringLiteral("功能开关"), tab);
     lab->setAlignment(Qt::AlignCenter);
-    lab->setGeometry(3, 104, 256, 22);
+    lab->setGeometry(3, 70, 256, 22);
     lab->setStyleSheet("color:#6B7280;font-family:'Microsoft YaHei';font-size:13px;font-weight:700;");
 
     QStringList names{
@@ -736,7 +752,7 @@ void MainWindow::buildLaunchTab(QWidget* tab) {
         b->configure(126, 28, 12, 13);
         b->setToggleMode(true);
         b->setActive(assistant_state.value(keys[i].toStdString(), true));
-        b->setGeometry(3 + (i % 2) * 130, 132 + (i / 2) * 34, 126, 28);
+        b->setGeometry(3 + (i % 2) * 130, 98 + (i / 2) * 34, 126, 28);
         assistant_buttons_[keys[i]] = b;
         connect(b, &QPushButton::clicked, this, [this, key = keys[i]] { toggleAssistant(key); });
     }
@@ -749,13 +765,14 @@ void MainWindow::buildCalibrationTab(QWidget* tab) {
         {QStringLiteral("识别区域缩放设置"), [this] { openScaleCalibrator(); }},
         {QStringLiteral("按键设置"), [this] { openHotkeySettingsWindow(); }},
         {QStringLiteral("压枪参数设置"), [this] { openRecoilDebugger(); }},
+        {QStringLiteral("AI 瞄准参数设置"), [this] { openAiAimSettingsWindow(); }},
         {QStringLiteral("特殊武器参数设置"), [this] { openSpecialWeaponDebugger(); }},
         {QStringLiteral("界面设置"), [this] { openDisplaySettingsWindow(); }},
     };
     for (int i = 0; i < actions.size(); ++i) {
         auto* b = new RoundedButton(actions[i].first, tab);
-        b->configure(256, 36, 12, 15);
-        b->setGeometry(3, 8 + i * 42, 256, 36);
+        b->configure(256, 31, 12, 14);
+        b->setGeometry(3, 6 + i * 36, 256, 31);
         if (i == 0) {
             b->setToggleMode(true);
             btn_debug_ = b;
@@ -1076,8 +1093,10 @@ void MainWindow::buildKeyTab(QWidget* tab) {
     };
     const QVector<RowDef> program_rows{
         {QStringLiteral("武器检测开关"), "toggle_weapon_detection", true},
-        {QStringLiteral("测距瞄准显示开关"), "toggle_display", true},
+        {QStringLiteral("测距辅助开关"), "toggle_display", true},
         {QStringLiteral("辅助压枪开关"), "toggle_recoil", true},
+        {QStringLiteral("AI瞄准开关"), "toggle_ai_aim", true},
+        {QStringLiteral("AI瞄准保持"), "ai_aim_hold", true},
         {QStringLiteral("大地图测距"), "measure_map", true},
         {QStringLiteral("迫击炮自动瞄准（长按）"), "mortar_auto_aim", true},
         {QStringLiteral("窗口显示开关"), "toggle_window", true},
@@ -1103,7 +1122,7 @@ void MainWindow::buildKeyTab(QWidget* tab) {
     const auto theme = currentUiTheme(config_);
     auto* root = new QVBoxLayout(tab);
     root->setContentsMargins(14, 8, 14, 14);
-    root->setSpacing(4);
+    root->setSpacing(2);
     auto addSection = [&](const QString& title) {
         auto* label = new QLabel(title, tab);
         label->setFixedHeight(24);
@@ -1127,6 +1146,7 @@ void MainWindow::buildKeyTab(QWidget* tab) {
 
         const std::string fallback = action == "fire_key" ? "end"
             : action == "mortar_auto_aim" ? "mouse_right"
+            : action == "ai_aim_hold" ? "mouse_right"
             : action == "toggle_window" ? "<home>"
             : action == "game_minimap" ? "n"
             : action == "hip_aim_key" ? "mouse_right"
@@ -1136,8 +1156,9 @@ void MainWindow::buildKeyTab(QWidget* tab) {
             : action == "marker_next" ? "<down>"
             : action == "throw" ? "b"
             : "";
+        const std::string configured = hotkeyValue(action, fallback);
         const QString display = editable
-            ? formatHotkey(hotkeyValue(action, fallback))
+            ? (configured.empty() ? QStringLiteral("未设置") : formatHotkey(configured))
             : QStringLiteral("鼠标左键 + 中键");
         auto* value = new QLabel(display, row_widget);
         value->setStyleSheet(QStringLiteral("color:%1;font-family:Consolas;font-size:13px;font-weight:700;").arg(theme.accent));
@@ -1202,7 +1223,7 @@ void MainWindow::toggleDisplay() {
         special_.setDisplayEnabled(display_enabled_);
         large_map_.setDisplay(display_enabled_);
     }
-    if (btn_display_) btn_display_->setText(display_enabled_ ? QStringLiteral("关闭瞄准辅助") : QStringLiteral("开启瞄准辅助"));
+    if (btn_display_) btn_display_->setText(display_enabled_ ? QStringLiteral("关闭测距辅助") : QStringLiteral("开启测距辅助"));
 }
 
 void MainWindow::toggleRecoil() {
@@ -1210,6 +1231,12 @@ void MainWindow::toggleRecoil() {
     if (callbacks_.set_recoil) callbacks_.set_recoil(recoil_enabled_);
     else recoil_.setEnabled(recoil_enabled_);
     if (btn_recoil_) btn_recoil_->setText(recoil_enabled_ ? QStringLiteral("关闭辅助压枪") : QStringLiteral("开启辅助压枪"));
+}
+
+void MainWindow::toggleAiAim() {
+    ai_aim_enabled_ = btn_ai_aim_ ? btn_ai_aim_->active() : !ai_aim_enabled_;
+    if (callbacks_.set_ai_aim) callbacks_.set_ai_aim(ai_aim_enabled_);
+    if (btn_ai_aim_) btn_ai_aim_->setText(ai_aim_enabled_ ? QStringLiteral("关闭AI瞄准") : QStringLiteral("开启AI瞄准"));
 }
 
 void MainWindow::toggleAssistant(const QString& key) {
@@ -1367,6 +1394,17 @@ void MainWindow::openSpecialWeaponDebugger() {
     showWindowInsideScreen(window);
 }
 
+void MainWindow::openAiAimSettingsWindow() {
+    if (!ai_aim_settings_window_) {
+        auto* window = new AiAimSettingsWindow(config_, this);
+        window->setApplySettingsCallback(callbacks_.apply_ai_aim_settings);
+        window->setAttribute(Qt::WA_DeleteOnClose, true);
+        window->setWindowFlag(Qt::Window, true);
+        ai_aim_settings_window_ = window;
+    }
+    showWindowInsideScreen(ai_aim_settings_window_);
+}
+
 void MainWindow::buildHelpTab(QWidget* tab) {
     tab->setFixedSize(262, 299);
     help_summary_label_ = new QLabel(tab);
@@ -1498,7 +1536,8 @@ bool MainWindow::captureHotkey(const QString& key, const QStringList& modifiers)
 
     const bool single_only = capturing_action_ == "throw" || capturing_action_ == "toggle_equipment" ||
                              capturing_action_ == "game_minimap" || capturing_action_ == "open_large_map" ||
-                             capturing_action_ == "hip_aim_key" || capturing_action_ == "sprint_key" ||
+                             capturing_action_ == "hip_aim_key" || capturing_action_ == "ai_aim_hold" ||
+                             capturing_action_ == "sprint_key" ||
                              capturing_action_ == "fire_key";
     if (single_only && !modifiers.isEmpty()) {
         const QString action = capturing_action_;
@@ -1530,10 +1569,13 @@ bool MainWindow::captureHotkey(const QString& key, const QStringList& modifiers)
         return it == existing_hotkeys.end() ? fallback : it->second;
     };
     const bool conflict = std::any_of(existing_hotkeys.begin(), existing_hotkeys.end(), [&](const auto& item) {
-        return item.first != action_std && item.second == combo_std;
+        return item.first != action_std && pubg::equivalentHotkey(item.second, combo_std);
     });
-    if (conflict || (action_std == "fire_key" && combo_std == hotkeyOr("toggle_window", "<home>")) ||
-        (action_std == "toggle_window" && combo_std == hotkeyOr("fire_key", "end"))) {
+    if (conflict ||
+        (action_std == "fire_key" &&
+         pubg::equivalentHotkey(combo_std, hotkeyOr("toggle_window", "<home>"))) ||
+        (action_std == "toggle_window" &&
+         pubg::equivalentHotkey(combo_std, hotkeyOr("fire_key", "end")))) {
         const QString action = capturing_action_;
         if (hotkey_labels_.contains(action)) {
             hotkey_labels_[action]->setText(QStringLiteral("按键冲突"));
@@ -1644,6 +1686,7 @@ void MainWindow::closeAuxiliaryWindows() {
     destroyWidget(scale_calibration_window_);
     destroyWidget(display_settings_window_);
     destroyPointer(recoil_debugger_window_);
+    destroyPointer(ai_aim_settings_window_);
     destroyPointer(special_weapon_debugger_window_);
     destroyPointer(hotkey_settings_window_);
     destroyPointer(help_window_);
@@ -1677,10 +1720,7 @@ void MainWindow::resetDefaultHotkeys() {
         data["hotkeys"] = Json{
             {"toggle_window", "<home>"},
             {"throw", "b"},
-            {"toggle_weapon_detection", "<f1>"},
-            {"toggle_display", "<f2>"},
-            {"toggle_recoil", "<f3>"},
-            {"measure_map", "<f4>"},
+            {"ai_aim_hold", "mouse_right"},
             {"mortar_auto_aim", "mouse_right"},
             {"game_minimap", "n"},
             {"hip_aim_key", "mouse_right"},
@@ -1691,6 +1731,9 @@ void MainWindow::resetDefaultHotkeys() {
             {"toggle_equipment", "tab"},
             {"fire_key", "end"},
         };
+        for (const auto& binding : kPrimaryHotkeyDefaults) {
+            data["hotkeys"][std::string(binding.action)] = std::string(binding.key);
+        }
     });
     config_.save();
     if (callbacks_.reload_hotkeys) callbacks_.reload_hotkeys();

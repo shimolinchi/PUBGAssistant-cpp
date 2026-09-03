@@ -30,6 +30,10 @@ MinSizeRel/
 *.log
 PUBGAssi.db*/
 
+# Downloaded research archives (keep local; do not commit large raw datasets)
+datasets/audio-candidates/**/*.zip
+datasets/audio-candidates/**/*.zip.part
+
 # OS/editor noise
 .DS_Store
 Thumbs.db

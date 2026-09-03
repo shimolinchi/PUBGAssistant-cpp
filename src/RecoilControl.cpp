@@ -4,7 +4,21 @@
 
 namespace pubg {
 
-RecoilControl::RecoilControl(Config& config, RegionManager* regions) : config_(config), regions_(regions) {
+RecoilControl::RecoilControl(Config& config, RegionManager* regions)
+    : RecoilControl(config, regions, sharedDefaultMouseMotionDispatcher()) {}
+
+RecoilControl::RecoilControl(
+    Config& config,
+    RegionManager* regions,
+    std::shared_ptr<MouseMotionDispatcher> motion_dispatcher)
+    : config_(config),
+      regions_(regions),
+      motion_dispatcher_(motion_dispatcher ? std::move(motion_dispatcher)
+                                           : sharedDefaultMouseMotionDispatcher()),
+      recoil_motion_channel_(motion_dispatcher_->createChannel(
+          MotionSource::Recoil, MotionPolicy::Accumulate)),
+      breath_motion_channel_(motion_dispatcher_->createChannel(
+          MotionSource::SrBreath, MotionPolicy::Latest)) {
     loadConfig();
 #if PUBG_ENABLE_INPUT_CONTROL
     worker_ = std::thread(&RecoilControl::workerLoop, this);
@@ -22,6 +36,8 @@ void RecoilControl::shutdown() {
     }
     enabled_ = false;
     running_ = false;
+    recoil_motion_channel_->closeAndFence();
+    breath_motion_channel_->closeAndFence();
 #if PUBG_ENABLE_INPUT_CONTROL
     int fire_vk = 0;
     {
@@ -176,6 +192,11 @@ bool RecoilControl::isFiring() const {
     return firing_;
 }
 
+bool RecoilControl::supportsWeapon(const std::string& weapon) const {
+    std::lock_guard lock(mutex_);
+    return !weapon.empty() && weapon_configs_.contains(weapon);
+}
+
 void RecoilControl::setSgPeekDirection(int direction) {
     std::lock_guard lock(mutex_);
     if (!sg_peek_visible_) {
@@ -203,33 +224,76 @@ void RecoilControl::hideSgPeekDirection() {
 void RecoilControl::setEnabled(bool enabled) {
     enabled_ = enabled;
     if (!enabled) {
-        std::lock_guard lock(mutex_);
-        firing_ = false;
-        fire_start_ = 0.0;
+        {
+            std::lock_guard lock(mutex_);
+            firing_ = false;
+            fire_start_ = 0.0;
 #if PUBG_ENABLE_INPUT_CONTROL
-        InputController::keyUp(fire_vk_);
+            InputController::keyUp(fire_vk_);
 #endif
-        stopSrBreathTrackingLocked();
+            stopSrBreathTrackingLocked();
+        }
+        recoil_motion_channel_->closeAndFence();
+        breath_motion_channel_->closeAndFence();
+        return;
+    }
+
+    bool enable_recoil_motion = false;
+    bool enable_breath_motion = false;
+    {
+        std::lock_guard lock(mutex_);
+        enable_recoil_motion = auto_recoil_enabled_ || dmr_tap_enabled_;
+        enable_breath_motion = sr_breath_control_enabled_;
+    }
+    if (enable_recoil_motion) {
+        recoil_motion_channel_->open();
+    }
+    if (enable_breath_motion) {
+        breath_motion_channel_->open();
     }
 }
 
 void RecoilControl::setFeatureEnabled(const std::string& key, bool enabled) {
-    std::lock_guard lock(mutex_);
-    if (key == "auto_recoil") {
-        auto_recoil_enabled_ = enabled;
-        if (!enabled) {
-            firing_ = false;
-            fire_start_ = 0.0;
+    bool update_recoil_channel = false;
+    bool update_breath_channel = false;
+    bool recoil_channel_enabled = false;
+    {
+        std::lock_guard lock(mutex_);
+        if (key == "auto_recoil") {
+            auto_recoil_enabled_ = enabled;
+            update_recoil_channel = true;
+            if (!enabled) {
+                firing_ = false;
+                fire_start_ = 0.0;
+            }
+        } else if (key == "dmr_tap") {
+            dmr_tap_enabled_ = enabled;
+            update_recoil_channel = true;
+        } else if (key == "sr_breath") {
+            sr_breath_control_enabled_ = enabled;
+            update_breath_channel = true;
+            if (!enabled) {
+                stopSrBreathTrackingLocked();
+            }
+        } else if (key == "sg_peek") {
+            sg_quick_peek_enabled_ = enabled;
         }
-    } else if (key == "dmr_tap") {
-        dmr_tap_enabled_ = enabled;
-    } else if (key == "sr_breath") {
-        sr_breath_control_enabled_ = enabled;
-        if (!enabled) {
-            stopSrBreathTrackingLocked();
+        recoil_channel_enabled = enabled_ && (auto_recoil_enabled_ || dmr_tap_enabled_);
+        update_breath_channel = update_breath_channel || (key == "sr_breath");
+    }
+    if (update_recoil_channel) {
+        if (recoil_channel_enabled) {
+            recoil_motion_channel_->open();
+        } else {
+            recoil_motion_channel_->closeAndFence();
         }
-    } else if (key == "sg_peek") {
-        sg_quick_peek_enabled_ = enabled;
+    }
+    if (update_breath_channel) {
+        if (enabled_ && enabled) {
+            breath_motion_channel_->open();
+        } else {
+            breath_motion_channel_->closeAndFence();
+        }
     }
 }
 
@@ -338,14 +402,17 @@ void RecoilControl::workerLoop() {
     ScreenCapture capture;
     while (running_) {
         const double loop_start = nowSeconds();
-        if (reload_requested_.exchange(false)) {
+        const bool left = InputController::isLeftMouseDown();
+        // Reloading reapplies the current weapon and releases the configured fire key.
+        // Defer it until the physical mouse button is up so an editor save cannot
+        // turn a held automatic burst into a single shot.
+        if (!left && reload_requested_.exchange(false)) {
             std::lock_guard lock(mutex_);
             const std::string weapon = current_weapon_;
             loadConfig();
             applyCurrentWeaponConfigLocked(weapon);
         }
         double delay_seconds = 0.02;
-        const bool left = InputController::isLeftMouseDown();
         const bool right = InputController::isKeyDown(VK_RBUTTON);
         {
             std::lock_guard lock(mutex_);
@@ -357,9 +424,9 @@ void RecoilControl::workerLoop() {
                     startSrBreathTrackingLocked();
                 }
             }
+            const bool sg_quick_peek = enabled_ && !current_weapon_.empty() &&
+                weapon_type_ == "sg" && sg_quick_peek_enabled_ && sg_peek_direction_ != 0;
             if (left && !last_left) {
-                const bool sg_quick_peek = enabled_ && !current_weapon_.empty() &&
-                    weapon_type_ == "sg" && sg_quick_peek_enabled_ && sg_peek_direction_ != 0;
                 if (sg_quick_peek) {
                     triggerSgQuickPeekShot(sg_peek_direction_);
                 } else {
@@ -367,9 +434,14 @@ void RecoilControl::workerLoop() {
                     if (enabled_ && !current_weapon_.empty() && weapon_type_ != "sr") {
                         if (weapon_type_ == "dmr") {
                             if (dmr_tap_enabled_) {
-                                const int strength = static_cast<int>(std::round(calculateStrength(0.0)));
+                                const double strength = calculateStrength(0.0);
                                 if (strength > 0) {
-                                    InputController::moveMouseRelative(0, strength);
+                                    (void)recoil_motion_channel_->submit(
+                                        0.0,
+                                        strength,
+                                        ++recoil_motion_sequence_,
+                                        MotionClock::now(),
+                                        std::chrono::milliseconds{100});
                                 }
                             }
                         } else if (auto_recoil_enabled_) {
@@ -384,16 +456,35 @@ void RecoilControl::workerLoop() {
                 InputController::keyUp(fire_vk_);
             }
 
+            if (left && last_left && !sg_quick_peek) {
+                // Weapon/config updates can race the mouse-down edge and release
+                // fire_vk_ after the initial press. Keep the game fire key held for
+                // as long as the player's physical left button remains held.
+                if (!auto_fire_ && fire_vk_ && !InputController::isKeyDown(fire_vk_)) {
+                    InputController::keyDown(fire_vk_);
+                }
+                if (enabled_ && auto_recoil_enabled_ && !firing_ && !current_weapon_.empty() &&
+                    weapon_type_ != "dmr" && weapon_type_ != "sr") {
+                    firing_ = true;
+                    fire_start_ = nowSeconds();
+                }
+            }
+
             if (enabled_ && auto_recoil_enabled_ && firing_ && !current_weapon_.empty() && weapon_type_ != "dmr" && weapon_type_ != "sr") {
                 const double t = nowSeconds() - fire_start_;
-                const int strength = static_cast<int>(std::round(calculateStrength(t)));
+                const double strength = calculateStrength(t);
                 if (auto_fire_) {
                     InputController::keyDown(fire_vk_);
                     std::this_thread::sleep_for(std::chrono::milliseconds(1));
                     InputController::keyUp(fire_vk_);
                 }
                 if (strength > 0) {
-                    InputController::moveMouseRelative(0, strength);
+                    (void)recoil_motion_channel_->submit(
+                        0.0,
+                        strength,
+                        ++recoil_motion_sequence_,
+                        MotionClock::now(),
+                        std::chrono::milliseconds{100});
                 }
             }
         }
@@ -591,10 +682,17 @@ void RecoilControl::applySrBreathControl(ScreenCapture& capture) {
         return;
     }
 
-    int move = static_cast<int>(std::round((sr_invert_y_ ? -dy : dy) * sr_move_scale_));
-    const int max_step = std::max(1, sr_max_step_);
-    move = std::max(-max_step, std::min(max_step, move));
-    if (move != 0) InputController::moveMouseRelative(0, move);
+    double move = (sr_invert_y_ ? -dy : dy) * sr_move_scale_;
+    const double max_step = static_cast<double>(std::max(1, sr_max_step_));
+    move = std::clamp(move, -max_step, max_step);
+    if (std::abs(move) >= 0.001) {
+        (void)breath_motion_channel_->submit(
+            0.0,
+            move,
+            ++breath_motion_sequence_,
+            MotionClock::now(),
+            std::chrono::milliseconds{50});
+    }
 #else
     (void)capture;
 #endif

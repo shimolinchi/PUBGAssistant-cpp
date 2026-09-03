@@ -254,6 +254,48 @@ bool HotkeyManager::foregroundAllowsKeys() {
     return allow;
 }
 
+bool HotkeyManager::isGameForeground() {
+    std::string target;
+    {
+        std::lock_guard lock(mutex_);
+        target = passthrough_exe_;
+    }
+    if (target.empty()) {
+        return false;
+    }
+
+    const HWND foreground = GetForegroundWindow();
+    if (!foreground) {
+        return false;
+    }
+    DWORD pid = 0;
+    GetWindowThreadProcessId(foreground, &pid);
+    if (!pid || pid == GetCurrentProcessId()) {
+        return false;
+    }
+
+    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (!process) {
+        return false;
+    }
+    wchar_t path[32768]{};
+    DWORD size = 32768;
+    const bool queried = QueryFullProcessImageNameW(process, 0, path, &size) != FALSE;
+    CloseHandle(process);
+    if (!queried) {
+        return false;
+    }
+
+    std::wstring full(path, size);
+    const auto slash = full.find_last_of(L"\\/");
+    const std::wstring base = slash == std::wstring::npos ? full : full.substr(slash + 1);
+    const std::wstring wanted = widen(target);
+    return base.size() == wanted.size() &&
+           std::equal(base.begin(), base.end(), wanted.begin(), [](wchar_t a, wchar_t b) {
+               return std::towlower(a) == std::towlower(b);
+           });
+}
+
 bool HotkeyManager::onKeyboardEvent(int vk, bool down) {
     if (vk < 0 || vk >= 256) return false;
 
@@ -348,6 +390,12 @@ void HotkeyManager::hookLoop() {
     hook_ready_ = false;
     s_active = nullptr;
     key_down_.fill(false);
+}
+
+#else
+
+bool HotkeyManager::isGameForeground() {
+    return false;
 }
 
 #endif  // _WIN32

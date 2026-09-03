@@ -108,7 +108,7 @@ void C4Assistant::draw(double countdown, double recommended_speed, bool start_pr
         : hexToBgr("#FFFFFF");
     cmds.push_back({OverlayCommand::Type::Text, cx - 70, y - 60, 0, 0, 0,
                     oneDecimal(std::max(0.0, countdown)) + " s",
-                    countdown_color, 1, font_size});
+                    countdown_color, 1, static_cast<double>(font_size)});
     std::string speed_text = "N/A";
     if (recommended_speed > 0.0 && recommended_speed <= 160.0) {
         speed_text = oneDecimal(recommended_speed) + " km/h";

@@ -49,6 +49,8 @@ public:
         std::function<void(bool)> set_weapon_detection;
         std::function<void(bool)> set_display;
         std::function<void(bool)> set_recoil;
+        std::function<void(bool)> set_ai_aim;
+        std::function<bool(const AiAimSettings&, std::string&)> apply_ai_aim_settings;
         std::function<void(const std::string&, bool)> set_assistant;
         std::function<void()> sync_marker_colors;
         std::function<void()> refresh_status_hud;
@@ -78,6 +80,7 @@ public:
     void setWeaponDetectionState(bool enabled);
     void setDisplayState(bool enabled);
     void setRecoilState(bool enabled);
+    void setAiAimState(bool enabled);
 
 protected:
     void mousePressEvent(QMouseEvent* event) override;
@@ -115,6 +118,7 @@ private:
     void toggleWeaponDetection();
     void toggleDisplay();
     void toggleRecoil();
+    void toggleAiAim();
     void toggleAssistant(const QString& key);
     void selectMap(int index);
     void selectMarkerSize(int index);
@@ -124,6 +128,7 @@ private:
     void openRegionCalibrationWindow();
     void openScaleCalibrator();
     void openRecoilDebugger();
+    void openAiAimSettingsWindow();
     void openSpecialWeaponDebugger();
     void openDisplaySettingsWindow();
     void openHotkeySettingsWindow();
@@ -166,6 +171,7 @@ private:
     bool weapon_detection_enabled_ = true;
     bool display_enabled_ = false;
     bool recoil_enabled_ = false;
+    bool ai_aim_enabled_ = false;
     bool debug_overlay_enabled_ = false;
     bool closing_ = false;
     QString capturing_action_;
@@ -176,6 +182,7 @@ private:
     RoundedButton* btn_weapon_detect_ = nullptr;
     RoundedButton* btn_display_ = nullptr;
     RoundedButton* btn_recoil_ = nullptr;
+    RoundedButton* btn_ai_aim_ = nullptr;
     RoundedButton* btn_debug_ = nullptr;
     RoundedButton* btn_region_calibration_ = nullptr;
     RoundedButton* btn_scale_calibration_ = nullptr;
@@ -191,6 +198,7 @@ private:
     QPointer<QWidget> region_calibration_window_;
     QPointer<RegionCalibrationOverlay> region_calibration_overlay_;
     QPointer<QWidget> recoil_debugger_window_;
+    QPointer<QWidget> ai_aim_settings_window_;
     QPointer<QWidget> special_weapon_debugger_window_;
     QPointer<QWidget> hotkey_settings_window_;
     QPointer<QWidget> help_window_;

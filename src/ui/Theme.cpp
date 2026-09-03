@@ -2,10 +2,16 @@
 
 #include <algorithm>
 #include <cmath>
+#include <QAbstractSpinBox>
+#include <QAbstractScrollArea>
+#include <QApplication>
 #include <QChildEvent>
+#include <QComboBox>
 #include <QEvent>
 #include <QMouseEvent>
 #include <QPushButton>
+#include <QSlider>
+#include <QWheelEvent>
 
 namespace pubg::ui {
 
@@ -56,7 +62,9 @@ protected:
         if (!window_) {
             return QObject::eventFilter(watched, event);
         }
-        if (watched == window_ && event->type() == QEvent::ChildAdded) {
+        // Some settings pages create nested controls after applying the theme.
+        // ChildPolished also covers widgets not fully constructed at ChildAdded.
+        if (event->type() == QEvent::ChildAdded || event->type() == QEvent::ChildPolished) {
             if (auto* child_event = static_cast<QChildEvent*>(event); child_event->child()) {
                 if (auto* child_widget = qobject_cast<QWidget*>(child_event->child())) {
                     installRecursive(child_widget);
@@ -71,6 +79,14 @@ protected:
         }
         if (auto* widget = qobject_cast<QWidget*>(watched)) {
             switch (event->type()) {
+            case QEvent::Wheel:
+                if (qobject_cast<QAbstractSpinBox*>(widget) ||
+                    qobject_cast<QSlider*>(widget) ||
+                    qobject_cast<QComboBox*>(widget)) {
+                    forwardWheelToScrollArea(widget, static_cast<QWheelEvent*>(event));
+                    return true;
+                }
+                break;
             case QEvent::MouseButtonPress:
                 return handlePress(widget, static_cast<QMouseEvent*>(event));
             case QEvent::MouseMove:
@@ -111,6 +127,25 @@ public:
     }
 
 private:
+    void forwardWheelToScrollArea(QWidget* widget, QWheelEvent* event) {
+        // An event filter returning true does not reliably bubble ignored wheel
+        // events. Send one translated copy to the nearest page viewport instead.
+        // Preserve touchpad deltas/phases; never let the source edit its value.
+        for (auto* parent = widget->parentWidget(); parent; parent = parent->parentWidget()) {
+            if (auto* area = qobject_cast<QAbstractScrollArea*>(parent)) {
+                auto* viewport = area->viewport();
+                QWheelEvent forwarded(viewport->mapFromGlobal(event->globalPosition()),
+                    event->globalPosition(), event->pixelDelta(), event->angleDelta(),
+                    event->buttons(), event->modifiers(), event->phase(), event->inverted(),
+                    event->source(), event->pointingDevice());
+                QApplication::sendEvent(viewport, &forwarded);
+                break;
+            }
+            if (parent == window_) break;
+        }
+        event->accept();
+    }
+
     enum Edge {
         Left = 0x1,
         Top = 0x2,

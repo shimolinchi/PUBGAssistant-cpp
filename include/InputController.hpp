@@ -11,6 +11,10 @@ public:
     // 相对移动鼠标。dx/dy 单位是 Windows 鼠标事件单位，压枪主要使用 dy。
     static void moveMouseRelative(int dx, int dy);
 
+    // 可检查的底层版本，供统一 mouse-motion backend 使用。
+    // 返回 false 表示 SendInput 未插入完整事件，并通过 error_code 返回 Win32 错误。
+    static bool tryMoveMouseRelative(int dx, int dy, unsigned long* error_code = nullptr) noexcept;
+
     // 按下一个虚拟键码，例如 VK_END。
     static void keyDown(int vk);
 
@@ -42,8 +46,11 @@ public:
     // 查询鼠标左键物理状态。压枪循环用它判断是否正在开火。
     static bool isLeftMouseDown();
 
-    // 读取当前鼠标位置，返回屏幕物理像素坐标。F4 大地图一次测距点击使用。
+    // 读取当前鼠标位置，返回屏幕物理像素坐标。默认 F5 的大地图一次测距点击使用。
     static std::pair<int, int> cursorPosition();
+
+    // 查询系统光标是否可见。失败时返回 nullopt，安全门控据此保持阻断。
+    static std::optional<bool> cursorVisibility() noexcept;
 
     // 将配置里的字符串按键转成 Win32 虚拟键码。
     // 支持 end/delete/home/tab/space/alt/ctrl/shift/f1-f12/mouse 按键和单字符键。

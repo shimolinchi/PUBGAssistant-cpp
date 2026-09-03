@@ -1,0 +1,52 @@
+{
+    "schema": "pubgassistant.ai_aim",
+    "schema_version": 1,
+    "compatibility": "corrected",
+    "runtime": {
+        "prefer_directml": true,
+        "allow_cpu_fallback": false,
+        "dml_device_index": 0,
+        "capture_adapter_index": 0,
+        "capture_output_index": 0,
+        "target_fps": 120
+    },
+    "detector": {
+        "confidence": 0.404,
+        "iou": 0.5,
+        "class_aware_nms": true
+    },
+    "targeting": {
+        "model_classes": true,
+        "enabled_classes": [false, true, false, false],
+        "location": 0.5,
+        "effective_range": 320.0,
+        "target_stickiness": 3.0
+    },
+    "tracking": {
+        "max_frame_age_ms": 80
+    },
+    "controller": {
+        "horizontal_fov": 115.0,
+        "vertical_fov": 100.0,
+        "max_pixels": 40.0,
+        "global_scale": 1.0,
+        "ads_sensitivity_scale_enabled": true,
+        "ads_sensitivity_base": 30.0,
+        "ads_sensitivity_current": 42.0,
+        "auto_scope_sensitivity": true,
+        "scope_sensitivity": [50.0, 40.0, 42.0, 41.0, 44.0, 50.0]
+    },
+    "prediction": {
+        "enabled": true,
+        "predict_factor": 2.195,
+        "velocity_deadzone": 2.013,
+        "automatic_boost_enabled": true,
+        "automatic_scale": 1.4,
+        "dmr_boost_enabled": true,
+        "dmr_scale": 2.0,
+        "max_lead_pixels": 120.0
+    },
+    "activation": {
+        "disable_variable_high_zoom": true
+    }
+}

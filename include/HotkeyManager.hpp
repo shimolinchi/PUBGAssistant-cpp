@@ -57,6 +57,10 @@ public:
     // 查询低级键盘钩子看到的真实物理按键状态；SendInput 注入按键不会更新这个状态。
     [[nodiscard]] bool physicalKeyDown(int vk);
 
+    // 严格判断当前前台窗口是否属于 setPassthroughProcess() 指定的游戏进程。
+    // 本程序自身处于前台时返回 false，供主动鼠标控制做安全门控。
+    [[nodiscard]] bool isGameForeground();
+
     // 清空所有已注册热键。重载配置时在 stop() 后调用。
     void clear();
 

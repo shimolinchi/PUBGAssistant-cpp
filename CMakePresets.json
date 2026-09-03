@@ -33,7 +33,11 @@
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
         "CMAKE_MAKE_PROGRAM": "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe",
         "CMAKE_TOOLCHAIN_FILE": "C:/Program Files/Microsoft Visual Studio/18/Community/VC/vcpkg/scripts/buildsystems/vcpkg.cmake",
-        "VCPKG_TARGET_TRIPLET": "x64-windows"
+        "VCPKG_TARGET_TRIPLET": "x64-windows",
+        "BUILD_TESTING": "OFF",
+        "PUBG_AI_AIM_BUILD_TESTS": "OFF",
+        "PUBG_AI_AIM_BUILD_ORT_SMOKE_TEST": "OFF",
+        "PUBG_AI_AIM_BUILD_EXAMPLES": "OFF"
       }
     },
     {
@@ -45,6 +49,32 @@
       "installDir": "C:/Projects/PUBGAssistant-cpp/.build/install/release",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "windows-x64-debug-tests",
+      "displayName": "Windows x64 Debug Tests",
+      "description": "Explicit Debug test build without the model/runtime smoke test.",
+      "inherits": "windows-x64-debug",
+      "binaryDir": "C:/Projects/PUBGAssistant-cpp/.build/tests/debug",
+      "cacheVariables": {
+        "BUILD_TESTING": "ON",
+        "PUBG_AI_AIM_BUILD_TESTS": "ON",
+        "PUBG_AI_AIM_ENABLE_WINDOWS_BACKENDS": "OFF",
+        "VCPKG_INSTALLED_DIR": "C:/Projects/PUBGAssistant-cpp/.build/debug/vcpkg_installed"
+      }
+    },
+    {
+      "name": "windows-x64-release-tests",
+      "displayName": "Windows x64 Release Tests",
+      "description": "Explicit Release test build without the model/runtime smoke test.",
+      "inherits": "windows-x64-release",
+      "binaryDir": "C:/Projects/PUBGAssistant-cpp/.build/tests/release",
+      "cacheVariables": {
+        "BUILD_TESTING": "ON",
+        "PUBG_AI_AIM_BUILD_TESTS": "ON",
+        "PUBG_AI_AIM_ENABLE_WINDOWS_BACKENDS": "OFF",
+        "VCPKG_INSTALLED_DIR": "C:/Projects/PUBGAssistant-cpp/.build/release/vcpkg_installed"
       }
     }
   ],
@@ -60,6 +90,84 @@
       "displayName": "Build Windows x64 Release",
       "configurePreset": "windows-x64-release",
       "configuration": "Release"
+    },
+    {
+      "name": "windows-x64-debug-tests",
+      "displayName": "Build Windows x64 Debug Tests",
+      "configurePreset": "windows-x64-debug-tests",
+      "configuration": "Debug",
+      "targets": [
+        "overlay_window_message_tests",
+        "equipment_selection_tests",
+        "primary_hotkeys_tests",
+        "ai_aim_hud_indicator_tests",
+        "ai_aim_settings_window_tests",
+        "display_settings_window_tests",
+        "status_hud_layout_tests",
+        "shutdown_sequence_tests",
+        "scope_exit_tests",
+        "game_menu_state_tracker_tests",
+        "latest_render_publication_tests",
+        "ai_aim_runtime_error_tracker_tests",
+        "ai_aim_host_context_tests",
+        "ai_aim_runtime_preflight_tests",
+        "ai_aim_config_persistence_tests",
+        "ai_aim_settings_tests",
+        "mouse_motion_dispatcher_tests",
+        "ai_aim_coordinator_tests",
+        "pubg_ai_aim_core_tests"
+      ]
+    },
+    {
+      "name": "windows-x64-release-tests",
+      "displayName": "Build Windows x64 Release Tests",
+      "configurePreset": "windows-x64-release-tests",
+      "configuration": "Release",
+      "targets": [
+        "overlay_window_message_tests",
+        "equipment_selection_tests",
+        "primary_hotkeys_tests",
+        "ai_aim_hud_indicator_tests",
+        "ai_aim_settings_window_tests",
+        "display_settings_window_tests",
+        "status_hud_layout_tests",
+        "shutdown_sequence_tests",
+        "scope_exit_tests",
+        "game_menu_state_tracker_tests",
+        "latest_render_publication_tests",
+        "ai_aim_runtime_error_tracker_tests",
+        "ai_aim_host_context_tests",
+        "ai_aim_runtime_preflight_tests",
+        "ai_aim_config_persistence_tests",
+        "ai_aim_settings_tests",
+        "mouse_motion_dispatcher_tests",
+        "ai_aim_coordinator_tests",
+        "pubg_ai_aim_core_tests"
+      ]
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "windows-x64-debug-tests",
+      "displayName": "Run Windows x64 Debug Tests",
+      "configurePreset": "windows-x64-debug-tests",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error"
+      }
+    },
+    {
+      "name": "windows-x64-release-tests",
+      "displayName": "Run Windows x64 Release Tests",
+      "configurePreset": "windows-x64-release-tests",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error"
+      }
     }
   ]
 }

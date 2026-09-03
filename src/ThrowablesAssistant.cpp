@@ -54,6 +54,7 @@ void ThrowablesAssistant::shutdown() {
         return;
     }
     enabled_ = false;
+    ++sequence_generation_;
     {
         std::lock_guard lock(mutex_);
         sequence_active_ = false;
@@ -81,6 +82,7 @@ void ThrowablesAssistant::setEnabled(bool enabled) {
     enabled_ = enabled;
     overlay_.show(enabled);
     if (!enabled) {
+        ++sequence_generation_;
         {
             std::lock_guard lock(mutex_);
             sequence_active_ = false;
@@ -173,21 +175,23 @@ void ThrowablesAssistant::releaseRunJumpKeys() {
 #endif
 }
 
-void ThrowablesAssistant::pullThrowable() {
+void ThrowablesAssistant::pullThrowable(std::uint64_t generation) {
 #if PUBG_ENABLE_INPUT_CONTROL
-    if (shutting_down_ || !running_) return;
+    if (shutting_down_ || !running_ || !enabled_ ||
+        generation != sequence_generation_.load()) return;
     const int pull_key = InputController::parseVirtualKey("r");
     InputController::keyDown(pull_key);
     for (int i = 0; i < 10 && !shutting_down_ && running_; ++i) {
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
     InputController::keyUp(pull_key);
-    if (shutting_down_ || !running_) return;
+    if (shutting_down_ || !running_ || !enabled_ ||
+        generation != sequence_generation_.load()) return;
     InputController::mouseLeftDown();
 #endif
 }
 
-void ThrowablesAssistant::startRunJumpKeys() {
+void ThrowablesAssistant::startRunJumpKeys(std::uint64_t generation) {
 #if PUBG_ENABLE_INPUT_CONTROL
     int sprint_key = configuredKey(config_, "sprint_key", "shift");
     const int w_key = InputController::parseVirtualKey("w");
@@ -195,7 +199,8 @@ void ThrowablesAssistant::startRunJumpKeys() {
     const bool player_sprint_down = sprint_key != 0 && InputController::isKeyDown(sprint_key);
     {
         std::lock_guard lock(mutex_);
-        if (!sequence_active_ || throw_mode_ != ThrowMode::RunJump || run_keys_released_) {
+        if (!sequence_active_ || throw_mode_ != ThrowMode::RunJump || run_keys_released_ ||
+            generation != sequence_generation_.load()) {
             return;
         }
         player_w_was_down_ = player_w_down;
@@ -284,6 +289,7 @@ void ThrowablesAssistant::onThrowKey(bool pressed) {
     const double start_time = nowSeconds();
     const double run_seconds = std::max(0.0, cfg.value("run_jump_run_seconds", 2.0));
     const double jump_delay = std::max(0.0, cfg.value("jump_delay_after_release", 0.3));
+    ++sequence_generation_;
     sequence_active_ = true;
     pull_done_ = false;
     run_started_ = false;
@@ -359,7 +365,7 @@ void ThrowablesAssistant::render() {
         cmds.push_back({OverlayCommand::Type::Line, cx - 30, y, cx + 30, y, 0, "", bgr, 1});
         cmds.push_back({OverlayCommand::Type::Text, cx + 34, y - 10, 0, 0, 0,
                         std::to_string(static_cast<int>(std::round(dist))) + "m",
-                        bgr, 1, assistTextSize(config_, 16), assistTextAlpha(config_)});
+                        bgr, 1, static_cast<double>(assistTextSize(config_, 16)), assistTextAlpha(config_)});
 
         const double clamped_cook = std::clamp(cook, 0.0, total_time);
         const double angle = arc_span * 0.5 - (clamped_cook / total_time) * arc_span;
@@ -373,7 +379,7 @@ void ThrowablesAssistant::render() {
                         mark_x - 2.0, mark_y, mark_x - 2.0 + vx / vlen * pointer_len,
                         mark_y + vy / vlen * pointer_len, 0, "", bgr, 2});
         cmds.push_back({OverlayCommand::Type::Text, mark_x + 10, mark_y - 7, 0, 0, 0,
-                        oneDecimal(cook) + "s", bgr, 1, assistTextSize(config_, 16), assistTextAlpha(config_)});
+                        oneDecimal(cook) + "s", bgr, 1, static_cast<double>(assistTextSize(config_, 16)), assistTextAlpha(config_)});
         ++drawn;
     }
     if (drawn > 0) {
@@ -386,30 +392,31 @@ void ThrowablesAssistant::render() {
 
 void ThrowablesAssistant::workerLoop() {
     while (running_) {
-        std::vector<ThrowAction> actions;
+        std::vector<std::pair<ThrowAction, std::uint64_t>> actions;
         {
             std::lock_guard lock(mutex_);
             const double now = nowSeconds();
+            const auto generation = sequence_generation_.load();
             if (sequence_active_) {
                 if (!pull_done_ && now >= pull_at_) {
                     pull_done_ = true;
-                    actions.push_back(ThrowAction::Pull);
+                    actions.emplace_back(ThrowAction::Pull, generation);
                 }
                 if (!run_started_ && throw_mode_ == ThrowMode::RunJump && now >= run_start_at_) {
                     run_started_ = true;
-                    actions.push_back(ThrowAction::StartRun);
+                    actions.emplace_back(ThrowAction::StartRun, generation);
                 }
                 if (!mouse_released_ && now >= release_at_) {
                     mouse_released_ = true;
-                    actions.push_back(ThrowAction::ReleaseMouse);
+                    actions.emplace_back(ThrowAction::ReleaseMouse, generation);
                 }
                 if (!jumped_ && usesJumpCurve(throw_mode_) && now >= jump_at_) {
                     jumped_ = true;
-                    actions.push_back(ThrowAction::Jump);
+                    actions.emplace_back(ThrowAction::Jump, generation);
                 }
                 if (throw_mode_ == ThrowMode::RunJump && jumped_ && !run_keys_released_ && now >= run_keys_up_at_) {
                     run_keys_released_ = true;
-                    actions.push_back(ThrowAction::ReleaseRunKeys);
+                    actions.emplace_back(ThrowAction::ReleaseRunKeys, generation);
                 }
                 const bool done = mouse_released_ && (!usesJumpCurve(throw_mode_) || jumped_) &&
                                   (throw_mode_ != ThrowMode::RunJump || run_keys_released_);
@@ -419,16 +426,17 @@ void ThrowablesAssistant::workerLoop() {
                 }
             }
         }
-        for (const auto action : actions) {
-            if (shutting_down_ || !running_) {
+        for (const auto& [action, generation] : actions) {
+            if (shutting_down_ || !running_ || !enabled_ ||
+                generation != sequence_generation_.load()) {
                 break;
             }
             switch (action) {
                 case ThrowAction::Pull:
-                    pullThrowable();
+                    pullThrowable(generation);
                     break;
                 case ThrowAction::StartRun:
-                    startRunJumpKeys();
+                    startRunJumpKeys(generation);
                     break;
                 case ThrowAction::ReleaseMouse:
                     InputController::mouseLeftUp();

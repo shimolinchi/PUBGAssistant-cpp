@@ -53,6 +53,14 @@ std::filesystem::path ResourcePaths::specialAssistantsFile() const {
     return configDir() / "special_assistants.json";
 }
 
+std::filesystem::path ResourcePaths::aiAimSettingsFile() const {
+    return configDir() / "ai_aim_settings.json";
+}
+
+std::filesystem::path ResourcePaths::aiAimRuntimeDir() const {
+    return root_ / "ai_aim_runtime";
+}
+
 std::filesystem::path ResourcePaths::regionConfigDir() const {
     return configDir() / "regions";
 }

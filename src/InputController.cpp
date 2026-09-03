@@ -3,16 +3,38 @@
 namespace pubg {
 
 void InputController::moveMouseRelative(int dx, int dy) {
+    (void)tryMoveMouseRelative(dx, dy, nullptr);
+}
+
+bool InputController::tryMoveMouseRelative(int dx, int dy, unsigned long* error_code) noexcept {
 #ifdef _WIN32
+    if (error_code) {
+        *error_code = ERROR_SUCCESS;
+    }
     INPUT input{};
     input.type = INPUT_MOUSE;
     input.mi.dx = dx;
     input.mi.dy = dy;
     input.mi.dwFlags = MOUSEEVENTF_MOVE;
-    SendInput(1, &input, sizeof(INPUT));
+    SetLastError(ERROR_SUCCESS);
+    if (SendInput(1, &input, sizeof(INPUT)) != 1) {
+        unsigned long error = GetLastError();
+        if (error == ERROR_SUCCESS) {
+            error = ERROR_GEN_FAILURE;
+        }
+        if (error_code) {
+            *error_code = error;
+        }
+        return false;
+    }
+    return true;
 #else
     (void)dx;
     (void)dy;
+    if (error_code) {
+        *error_code = 0;
+    }
+    return true;
 #endif
 }
 
@@ -135,6 +157,19 @@ std::pair<int, int> InputController::cursorPosition() {
     }
 #endif
     return {0, 0};
+}
+
+std::optional<bool> InputController::cursorVisibility() noexcept {
+#ifdef _WIN32
+    CURSORINFO info{};
+    info.cbSize = sizeof(info);
+    if (!GetCursorInfo(&info)) {
+        return std::nullopt;
+    }
+    return (info.flags & CURSOR_SHOWING) != 0;
+#else
+    return std::nullopt;
+#endif
 }
 
 int InputController::parseVirtualKey(const std::string& key) {

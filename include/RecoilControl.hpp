@@ -2,6 +2,7 @@
 
 #include "Config.hpp"
 #include "InputController.hpp"
+#include "MouseMotionDispatcher.hpp"
 #include "RegionManager.hpp"
 #include "ScopeMotionTracker.hpp"
 
@@ -13,6 +14,10 @@ class RecoilControl {
 public:
     // 构造时读取 recoil_settings，并启动后台 workerLoop。
     explicit RecoilControl(Config& config, RegionManager* regions = nullptr);
+    RecoilControl(
+        Config& config,
+        RegionManager* regions,
+        std::shared_ptr<MouseMotionDispatcher> motion_dispatcher);
 
     // 停止后台线程并释放 fire_key，避免退出时卡键。
     ~RecoilControl();
@@ -44,6 +49,9 @@ public:
 
     // 当前是否处于压枪开火状态。App 用它避免开火中武器识别抖动打断压枪。
     [[nodiscard]] bool isFiring() const;
+
+    // 查询压枪模块已经加载的武器配置，供宿主复用同一份武器能力表。
+    [[nodiscard]] bool supportsWeapon(const std::string& weapon) const;
 
 private:
     // 从 Config 中读取 fire_key、曲线步长、武器曲线、姿势倍率和配件倍率。
@@ -79,6 +87,11 @@ private:
     // 外部依赖：读取 recoil_settings 和 hotkeys.fire_key。
     Config& config_;
     RegionManager* regions_ = nullptr;
+    std::shared_ptr<MouseMotionDispatcher> motion_dispatcher_;
+    std::shared_ptr<MouseMotionChannel> recoil_motion_channel_;
+    std::shared_ptr<MouseMotionChannel> breath_motion_channel_;
+    std::atomic_uint64_t recoil_motion_sequence_{0};
+    std::atomic_uint64_t breath_motion_sequence_{0};
 
     // 后台 worker 生命周期和总开关。
     std::atomic_bool running_{true};

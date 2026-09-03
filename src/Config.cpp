@@ -1,4 +1,5 @@
 #include "Config.hpp"
+#include "ScopeExit.hpp"
 
 #include <array>
 #include <fstream>
@@ -120,6 +121,16 @@ void Config::mergeSplitConfig() {
             data_[it.key()] = it.value();
         }
     }
+    std::error_code ai_aim_error;
+    if (std::filesystem::exists(paths_.aiAimSettingsFile(), ai_aim_error) && !ai_aim_error) {
+        if (loadJsonFile(paths_.aiAimSettingsFile(), split)) {
+            data_["ai_aim"] = std::move(split);
+        } else {
+            // Preserve a malformed-file signal for typed validation instead of silently
+            // turning a parse error into valid defaults.
+            data_["ai_aim"] = Json{};
+        }
+    }
 }
 
 Json Config::baseConfigWithoutSplitSections() const {
@@ -129,6 +140,10 @@ Json Config::baseConfigWithoutSplitSections() const {
     base.erase("real_regions");
     base.erase("real_scales");
     base.erase("region_scaling_settings");
+    std::error_code ai_aim_error;
+    if (std::filesystem::exists(paths_.aiAimSettingsFile(), ai_aim_error) && !ai_aim_error) {
+        base.erase("ai_aim");
+    }
     static constexpr std::array<const char*, 6> special_keys = {
         "throwables_config",
         "rocket_config",
@@ -244,6 +259,185 @@ std::unordered_map<std::string, std::string> Config::hotkeys() const {
         }
     }
     return out;
+}
+
+AiAimSettings Config::aiAimSettings() const {
+    std::shared_lock<std::shared_mutex> lock(mutex_);
+    if (data_.contains("ai_aim")) {
+        return parseAiAimSettings(data_["ai_aim"]);
+    }
+    return parseAiAimSettings(Json::object());
+}
+
+bool Config::readAiAimSettingsDocument(
+    AiAimSettingsDocumentSnapshot& snapshot, std::string& error) const {
+    std::shared_lock<std::shared_mutex> lock(mutex_);
+    return readAiAimSettingsDocumentUnlocked(snapshot, error);
+}
+
+bool Config::readAiAimSettingsDocumentUnlocked(
+    AiAimSettingsDocumentSnapshot& snapshot, std::string& error) const {
+    error.clear();
+    try {
+        const auto path = paths_.aiAimSettingsFile();
+        std::error_code status_error;
+        const bool exists = std::filesystem::exists(path, status_error);
+        if (status_error) {
+            error = "Cannot inspect AI settings: " + status_error.message();
+            return false;
+        }
+        if (!exists) {
+            snapshot = {data_.contains("ai_aim") ? data_["ai_aim"] : Json::object(), false};
+            return true;
+        }
+        std::ifstream input(path, std::ios::binary);
+        if (!input) {
+            error = "Cannot read AI settings file: " + path.string();
+            return false;
+        }
+        // Parse the entire stream, including rejecting non-whitespace trailing data.
+        Json loaded = Json::parse(input);
+        if (input.bad()) {
+            error = "I/O error while reading AI settings file";
+            return false;
+        }
+        snapshot = {std::move(loaded), true};
+        return true;
+    } catch (const std::exception& failure) {
+        error = std::string("Cannot read AI settings: ") + failure.what();
+        return false;
+    }
+}
+
+bool Config::saveAiAimSettings(
+    const Json& document, const AiAimSettingsDocumentSnapshot& expected, std::string& error) {
+    error.clear();
+    const auto settings = parseAiAimSettings(document);
+    if (!settings.valid()) {
+        error = settings.validation_error;
+        return false;
+    }
+
+    std::unique_lock<std::shared_mutex> lock(mutex_);
+    try {
+        AiAimSettingsDocumentSnapshot current;
+        if (!readAiAimSettingsDocumentUnlocked(current, error)) {
+            return false;
+        }
+        if (current != expected) {
+            error = "AI settings changed outside this editor; reopen the settings before saving";
+            return false;
+        }
+        const auto current_settings = parseAiAimSettings(current.document);
+        if (!current_settings.valid()) {
+            error = "Existing AI settings are invalid; the editor cannot overwrite them: " +
+                current_settings.validation_error;
+            return false;
+        }
+
+        // Allocate the future in-memory state before writing, so allocation failures
+        // cannot leave disk updated while the caller receives a save failure.
+        Json saved_data = data_;
+        saved_data["ai_aim"] = document;
+        const std::string serialized = document.dump(4);
+        // nlohmann serializes non-finite floating values as null. Reject such
+        // in-memory inputs rather than successfully persisting an invalid document.
+        const auto serialized_settings = parseAiAimSettings(Json::parse(serialized));
+        if (!serialized_settings.valid()) {
+            error = serialized_settings.validation_error;
+            return false;
+        }
+        const auto path = paths_.aiAimSettingsFile();
+        std::filesystem::create_directories(path.parent_path());
+        static std::atomic_uint64_t next_temporary_id{0};
+        auto temporary = path;
+        temporary += ".tmp." + std::to_string(
+            std::chrono::steady_clock::now().time_since_epoch().count()) + "." +
+            std::to_string(next_temporary_id.fetch_add(1, std::memory_order_relaxed));
+        bool temporary_created = false;
+        const ScopeExit cleanup([&]() noexcept {
+            if (temporary_created) {
+                std::error_code ignored;
+                std::filesystem::remove(temporary, ignored);
+            }
+        });
+
+#ifdef _WIN32
+        HANDLE file = CreateFileW(temporary.c_str(), GENERIC_WRITE, 0, nullptr,
+                                 CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (file == INVALID_HANDLE_VALUE) {
+            error = "Cannot create temporary AI settings: " +
+                std::system_category().message(static_cast<int>(GetLastError()));
+            return false;
+        }
+        temporary_created = true;
+        {
+            const ScopeExit close_file([&]() noexcept { CloseHandle(file); });
+            std::size_t written = 0;
+            while (written < serialized.size()) {
+                const DWORD chunk = static_cast<DWORD>(std::min<std::size_t>(
+                    serialized.size() - written, 1024 * 1024));
+                DWORD count = 0;
+                if (!WriteFile(file, serialized.data() + written, chunk, &count, nullptr) ||
+                    count == 0) {
+                    error = "Cannot write temporary AI settings";
+                    return false;
+                }
+                written += count;
+            }
+            if (!FlushFileBuffers(file)) {
+                error = "Cannot flush temporary AI settings";
+                return false;
+            }
+        }
+#else
+        {
+            std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
+            if (!output) {
+                error = "Cannot create temporary AI settings";
+                return false;
+            }
+            temporary_created = true;
+            output << serialized;
+            output.flush();
+            output.close();
+            if (!output) {
+                error = "Cannot write temporary AI settings";
+                return false;
+            }
+        }
+#endif
+
+        // Recheck after staging the write as well; an external edit while the
+        // temporary file was being written must not be silently replaced.
+        if (!readAiAimSettingsDocumentUnlocked(current, error)) {
+            return false;
+        }
+        if (current != expected) {
+            error = "AI settings changed outside this editor; reopen the settings before saving";
+            return false;
+        }
+#ifdef _WIN32
+        // A baseline without a split file may create one, but must not replace
+        // a file another editor creates after the final optimistic check.
+        const DWORD move_flags = MOVEFILE_WRITE_THROUGH |
+            (expected.split_file_exists ? MOVEFILE_REPLACE_EXISTING : 0);
+        if (!MoveFileExW(temporary.c_str(), path.c_str(),
+                         move_flags)) {
+            error = "Cannot replace AI settings file: " +
+                std::system_category().message(static_cast<int>(GetLastError()));
+            return false;
+        }
+#else
+        std::filesystem::rename(temporary, path);
+#endif
+        temporary_created = false;
+        data_.swap(saved_data);
+        return true;
+    } catch (const std::exception& failure) {
+        error = std::string("Cannot save AI settings: ") + failure.what();
+        return false;
+    }
 }
 
 } // namespace pubg

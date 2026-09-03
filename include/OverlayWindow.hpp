@@ -16,7 +16,7 @@ struct OverlayCommand {
     std::string text;
     cv::Scalar bgr{255, 255, 255};
     int width = 2;
-    int font_size = 18;
+    double font_size = 18.0;
     int alpha = 255;
 };
 
@@ -49,7 +49,7 @@ public:
     // 主动关闭底层 Win32 窗口。退出时先调用它，避免后台线程残留的重绘消息继续访问旧句柄。
     void close();
 
-    // 处理本线程窗口消息。识别/HUD 线程需要周期调用，否则窗口不刷新。
+    // 仅处理本 overlay 的窗口消息，避免重入同线程的 Qt/其他窗口回调。
     void pumpMessages();
 
     // 窗口是否已经成功创建。

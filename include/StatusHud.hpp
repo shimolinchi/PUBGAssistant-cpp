@@ -1,6 +1,8 @@
 #pragma once
 
 #include "Config.hpp"
+#include "AiAimTargetOverlay.hpp"
+#include "LatestRenderPublication.hpp"
 #include "OverlayWindow.hpp"
 #include "RegionManager.hpp"
 
@@ -12,14 +14,14 @@
 namespace pubg {
 
 // 左下角持久状态 HUD，对应 Python main.py 中 TransparentHudWindow 状态层。
-// 显示标点颜色、识别/测距/压枪开关、装备栏状态、两个武器槽和当前姿势。
+// 显示标点颜色、识别/测距/压枪/AI 瞄准开关、装备栏状态、两个武器槽和当前姿势。
 class StatusHud {
 public:
     StatusHud(Config& config, RegionManager& regions);
     ~StatusHud();
 
-    // 主开关状态变化时调用，更新“识别/测距/压枪”的颜色。
-    void setSwitches(bool weapon_detection, bool display, bool recoil);
+    // 主开关状态变化时调用；“自瞄”颜色结合当前识别武器更新。
+    void setSwitches(bool weapon_detection, bool display, bool recoil, bool ai_aim);
 
     // 装备栏状态变化时调用，status 使用 opened/closed/confirming。
     void setEquipmentStatus(const std::string& status);
@@ -43,6 +45,14 @@ public:
     void showTemporaryMessage(const std::string& text, int duration_ms = 1500,
                               const std::string& color_hex = "#F59E0B");
 
+    // Clear only a message owned by the named module, preserving temporary
+    // messages from other assistants.
+    void clearTemporaryMessageWithPrefix(const std::string& prefix);
+
+    // One publication updates both optional outlines and actual recognition Hz.
+    void setAiSnapshot(const ai_aim::AimSnapshot& snapshot,
+                       bool boxes_enabled, int max_frame_age_ms);
+
     // 重新绘制 HUD。
     void render();
 
@@ -55,6 +65,7 @@ private:
     Config& config_;
     RegionManager& regions_;
     OverlayWindow overlay_;
+    LatestRenderPublication render_publication_;
     std::mutex mutex_;
     std::mutex message_mutex_;
     std::condition_variable message_cv_;
@@ -63,8 +74,13 @@ private:
     bool weapon_detection_enabled_ = true;
     bool display_enabled_ = false;
     bool recoil_enabled_ = false;
+    bool ai_aim_enabled_ = false;
+    bool ai_boxes_enabled_ = false;
+    int ai_frame_max_age_ms_ = 80;
+    std::shared_ptr<const ai_aim::DetectionFrame> ai_detection_frame_;
+    std::string ai_recognition_frequency_text_ = "fps: 0.0";
     bool marker_indicator_visible_ = false;
-    std::uint64_t message_token_ = 0;
+    // All temporary-message fields below are protected by message_mutex_.
     bool message_stop_ = false;
     std::chrono::steady_clock::time_point message_deadline_{};
     std::string temporary_message_;

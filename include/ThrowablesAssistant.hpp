@@ -52,8 +52,8 @@ private:
     ThrowMode throwModeForDistance(double distance) const;
     bool usesJumpCurve(ThrowMode mode) const;
     int throwModeIndex(ThrowMode mode) const;
-    void pullThrowable();
-    void startRunJumpKeys();
+    void pullThrowable(std::uint64_t generation);
+    void startRunJumpKeys(std::uint64_t generation);
     void releaseRunJumpKeys();
     void showWarning(const std::string& text);
     void drawWarningBox(const std::string& text);
@@ -66,6 +66,7 @@ private:
     std::atomic_bool running_{true};
     std::atomic_bool shutting_down_{false};
     std::atomic_bool enabled_{false};
+    std::atomic_uint64_t sequence_generation_{0};
     std::thread worker_;
     std::mutex mutex_;
     std::string selected_color_ = "Yellow";

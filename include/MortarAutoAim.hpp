@@ -5,6 +5,7 @@
 #include "ElevationRadar.hpp"
 #include "LargeMapRadar.hpp"
 #include "MinimapRadar.hpp"
+#include "MouseMotionDispatcher.hpp"
 #include "RegionManager.hpp"
 #include "ScreenCapture.hpp"
 
@@ -23,6 +24,9 @@ public:
 
     MortarAutoAim(Config& config, RegionManager& regions, MinimapRadar& minimap, LargeMapRadar& large_map,
                   ElevationRadar& elevation, MessageCallback message_callback = {});
+    MortarAutoAim(Config& config, RegionManager& regions, MinimapRadar& minimap, LargeMapRadar& large_map,
+                  ElevationRadar& elevation, std::shared_ptr<MouseMotionDispatcher> motion_dispatcher,
+                  MessageCallback message_callback = {});
     ~MortarAutoAim();
 
     void trigger(const std::string& selected_color);
@@ -60,6 +64,9 @@ private:
     ElevationRadar& elevation_;
     Ballistics ballistics_;
     MessageCallback message_callback_;
+    std::shared_ptr<MouseMotionDispatcher> motion_dispatcher_;
+    std::shared_ptr<MouseMotionChannel> motion_channel_;
+    std::atomic_uint64_t motion_sequence_{0};
     std::atomic_bool running_{false};
     std::thread worker_;
 };

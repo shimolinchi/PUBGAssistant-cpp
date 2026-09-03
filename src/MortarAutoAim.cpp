@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <exception>
 #include <iostream>
 #include <utility>
 
@@ -11,8 +12,19 @@ namespace pubg {
 
 MortarAutoAim::MortarAutoAim(Config& config, RegionManager& regions, MinimapRadar& minimap, LargeMapRadar& large_map,
                              ElevationRadar& elevation, MessageCallback message_callback)
+    : MortarAutoAim(config, regions, minimap, large_map, elevation,
+                    sharedDefaultMouseMotionDispatcher(), std::move(message_callback)) {}
+
+MortarAutoAim::MortarAutoAim(Config& config, RegionManager& regions, MinimapRadar& minimap, LargeMapRadar& large_map,
+                             ElevationRadar& elevation,
+                             std::shared_ptr<MouseMotionDispatcher> motion_dispatcher,
+                             MessageCallback message_callback)
     : config_(config), regions_(regions), minimap_(minimap), large_map_(large_map), elevation_(elevation),
-      ballistics_(config), message_callback_(std::move(message_callback)) {}
+      ballistics_(config), message_callback_(std::move(message_callback)),
+      motion_dispatcher_(motion_dispatcher ? std::move(motion_dispatcher)
+                                           : sharedDefaultMouseMotionDispatcher()),
+      motion_channel_(motion_dispatcher_->createChannel(
+          MotionSource::Mortar, MotionPolicy::Latest)) {}
 
 MortarAutoAim::~MortarAutoAim() {
     shutdown();
@@ -26,14 +38,44 @@ void MortarAutoAim::trigger(const std::string& selected_color) {
     if (worker_.joinable()) {
         worker_.join();
     }
-    worker_ = std::thread(&MortarAutoAim::run, this, selected_color);
+    try {
+        worker_ = std::thread([this, selected_color] {
+            try {
+                run(selected_color);
+            } catch (const std::exception& error) {
+                std::cerr << "[mortar-auto] worker failed: " << error.what() << "\n";
+                motion_channel_->closeAndFence();
+                running_ = false;
+                try {
+                    if (message_callback_) {
+                        message_callback_("迫击炮自动瞄准失败", selected_color);
+                    }
+                } catch (...) {
+                }
+            } catch (...) {
+                std::cerr << "[mortar-auto] worker failed with an unknown error\n";
+                motion_channel_->closeAndFence();
+                running_ = false;
+                try {
+                    if (message_callback_) {
+                        message_callback_("迫击炮自动瞄准失败", selected_color);
+                    }
+                } catch (...) {
+                }
+            }
+        });
+    } catch (...) {
+        running_ = false;
+        throw;
+    }
 }
 
 void MortarAutoAim::shutdown() {
+    running_ = false;
+    motion_channel_->closeAndFence();
     if (worker_.joinable()) {
         worker_.join();
     }
-    running_ = false;
 }
 
 std::optional<double> MortarAutoAim::targetDistance(const std::string& selected_color) const {
@@ -251,19 +293,41 @@ void MortarAutoAim::alignDirection(const std::string& selected_color, std::atomi
         previous_error = error;
         have_previous = true;
         const double output = kp * error + ki * integral + kd * derivative;
-        int dx = static_cast<int>(std::round(std::clamp(output, -max_step, max_step)));
-        if (dx == 0) {
-            dx = error > 0 ? 1 : -1;
+        double dx = std::clamp(output, -max_step, max_step);
+        if (std::abs(dx) < 1.0) {
+            dx = error > 0 ? 1.0 : -1.0;
         }
-        InputController::moveMouseRelative(dx, 0);
+        (void)motion_channel_->submit(
+            dx,
+            0.0,
+            ++motion_sequence_,
+            MotionClock::now(),
+            std::chrono::milliseconds{25});
         std::this_thread::sleep_for(std::chrono::milliseconds(step_delay));
     }
 }
 
 void MortarAutoAim::run(std::string selected_color) {
-    const auto finish = [this] {
+    ExclusiveMotionLease exclusive_motion = motion_dispatcher_->acquireExclusive(MotionSource::Mortar);
+    if (!exclusive_motion) {
+        running_ = false;
+        return;
+    }
+    motion_channel_->open();
+
+    bool finished = false;
+    const auto finish = [this, &finished] {
+        if (finished) {
+            return;
+        }
+        finished = true;
+        motion_channel_->closeAndFence();
         running_ = false;
     };
+    struct FinishGuard {
+        const decltype(finish)& finish;
+        ~FinishGuard() { finish(); }
+    } finish_guard{finish};
 
     const auto distance = targetDistance(selected_color);
     if (!distance) {
