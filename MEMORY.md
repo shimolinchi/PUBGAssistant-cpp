@@ -6,6 +6,7 @@
 - MSVC/Ninja dependency fix: `cmake/msvc_ninja_dependencies.cmake` probes the literal `/showIncludes` prefix with `ENCODING NONE`. CMake's AUTO decoding had corrupted the Chinese prefix and recorded zero header dependencies, mixing old/new ABIs after header edits. VSLANG did not help because only the Chinese compiler resources are installed. Keep the probe; all four build trees were clean-rebuilt and real header dependencies verified (including AimTypes/App). Do not trust old incremental artifacts.
 - Work style: inspect conventions, reuse abstractions, make small modular changes, add focused tests before full regression. Honor explicitly source-only batches until the user asks to compile. The latest batch was explicitly compiled and packaged; no pending source-only hold remains.
 - Before replacing a package, ensure the assistant is closed, back up the current package, and restore/hash-check user runtime configuration. Do not disturb an active game. Never restore configuration from an older unrelated backup.
+- Keep downloaded research ZIPs under `datasets/audio-candidates/` local via `.gitignore`; retain small curated previews. On 2026-09-04, the unpushed feature commit was amended to remove 466.28MB and 53.38MB archives while preserving both local files. Outgoing largest blob became the required 42.53MB AI model; cleaned commit `5b1f9d3` was pushed to `origin/master` without force.
 
 ## Product and integration
 
