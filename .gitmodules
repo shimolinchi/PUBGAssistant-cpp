@@ -1,0 +1,3 @@
+[submodule "modules/PUBGAudio"]
+	path = modules/PUBGAudio
+	url = https://github.com/shimolinchi/PUBGAudio.git
