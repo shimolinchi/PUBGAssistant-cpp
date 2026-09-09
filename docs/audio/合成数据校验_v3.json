@@ -1,0 +1,80 @@
+{
+  "status": "passed",
+  "wav_files": 3000,
+  "label_files": 3000,
+  "total_hours": 25.0,
+  "audio_and_label_bytes": 16051203502,
+  "checked_footstep_tracks": 2569,
+  "checked_foot_contacts": 100166,
+  "checked_vehicle_tracks": 2580,
+  "checked_moving_tracks": 5149,
+  "same_surface_for_both_feet": true,
+  "preserved_phase_across_pauses": true,
+  "trajectories_and_frame_labels_match": true,
+  "native_vehicle_actions_verified": true,
+  "proprietary_rev_engine_rendered": false,
+  "engine_render_is_documented_approximation": true,
+  "source_pcm_shared_between_splits": 0,
+  "no_output_clipping": true,
+  "self_labels_separate_from_external": true,
+  "self_direction_invalid": true,
+  "self_identity_never_inferred_from_distance": true,
+  "aircraft_supervision_disabled": true,
+  "reproduced_pcm_and_labels_identical": [
+    "train_000002",
+    "train_000009",
+    "train_000001",
+    "validation_000001",
+    "validation_000002",
+    "validation_000004",
+    "test_000004",
+    "test_000002",
+    "test_000001",
+    "train_000005",
+    "train_000004",
+    "train_000003",
+    "validation_000006",
+    "validation_000003",
+    "test_000003",
+    "test_000008"
+  ],
+  "measured_density": {
+    "train/low": {
+      "active_fraction": 0.25114628517406296,
+      "overlap_fraction": 0.031710877544210876
+    },
+    "train/medium": {
+      "active_fraction": 0.7042872237316682,
+      "overlap_fraction": 0.33165149276260386
+    },
+    "train/high": {
+      "active_fraction": 0.9389361583806028,
+      "overlap_fraction": 0.7379229229229229
+    },
+    "validation/low": {
+      "active_fraction": 0.2553358914470026,
+      "overlap_fraction": 0.029899343788232675
+    },
+    "validation/medium": {
+      "active_fraction": 0.6973004750782529,
+      "overlap_fraction": 0.30543241654352765
+    },
+    "validation/high": {
+      "active_fraction": 0.8966611055499945,
+      "overlap_fraction": 0.6471938605271939
+    },
+    "test/low": {
+      "active_fraction": 0.25724891558224894,
+      "overlap_fraction": 0.03336113891669447
+    },
+    "test/medium": {
+      "active_fraction": 0.767132211576656,
+      "overlap_fraction": 0.44736164736164735
+    },
+    "test/high": {
+      "active_fraction": 0.9731242353464575,
+      "overlap_fraction": 0.8569903236569903
+    }
+  },
+  "limitation": "Engineering verification, not a human listening acceptance or a model evaluation."
+}

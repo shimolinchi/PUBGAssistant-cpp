@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>轨迹试听 · 远处与自身声音</title>
+<style>
+:root { color-scheme: light dark; font-family: "Segoe UI", "Microsoft YaHei", sans-serif; background: light-dark(#f4f6f9,#11151d); color: light-dark(#202939,#e2e8f2); }
+* { box-sizing: border-box; }
+main { max-width: 1040px; margin: 28px auto; padding: 0 24px 28px; }
+h1 { font-size: 25px; margin: 0 0 9px; }
+p { line-height: 1.65; margin: 10px 0 18px; color: light-dark(#536174,#aebace); }
+label { display: block; margin: 18px 0 8px; font-weight: 600; }
+select { width: 100%; padding: 11px; font: inherit; border: 1px solid light-dark(#c8d3e0,#465165); border-radius: 6px; background: light-dark(#fff,#1a2230); }
+audio { width: 100%; margin: 16px 0 8px; }
+.layout { display: grid; grid-template-columns: minmax(0,1.3fr) minmax(260px,1fr); gap: 25px; align-items: start; }
+svg { display: block; width: 100%; background: light-dark(#fff,#161e2a); border-radius: 8px; }
+svg text { fill: currentColor; font: 15px "Microsoft YaHei", sans-serif; }
+.small { font-size: 13px; }
+.value { font-variant-numeric: tabular-nums; font-size: 22px; font-weight: 600; margin: 15px 0; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th,td { text-align: left; padding: 10px 5px; border-bottom: 1px solid light-dark(#dde4ec,#354155); vertical-align: top; }
+th { font-weight: 600; }
+.actor { border-left: 4px solid; padding-left: 9px; }
+.note { border-left: 3px solid #c18b2b; padding-left: 12px; font-size: 14px; }
+details { margin-top: 24px; }
+summary { cursor: pointer; font-weight: 600; }
+@media(max-width:740px) { main { padding: 0 14px 24px; margin-top: 18px; } .layout { grid-template-columns: 1fr; gap: 4px; } svg text { font-size: 22px; } }
+</style>
+</head>
+<body>
+<main id="motion-review">
+<h1>轨迹试听 · 远处与自身声音</h1>
+<p>每段 30 秒。佩戴耳机，保持播放音量一致来比较远近。拖动进度条可对照曲线路径与动作；每条脚步轨迹始终使用同一种地面。</p>
+<label for="sample">试听样本</label>
+<select id="sample"></select>
+<audio id="player" controls preload="metadata"></audio>
+<p class="small"><a id="frame-csv">下载本段逐帧标注（10 ms）</a> · <a href="试听索引.md">填写试听反馈表</a></p>
+<div class="layout">
+  <div>
+    <svg id="map" viewBox="0 0 640 400" role="img" aria-label="听者固定在中心，播放时显示声源移动轨迹"></svg>
+    <p class="small">上方为正前，右侧为右方。淡线是完整曲线，实线是已经走过的路线。图按当前样本缩放；距离为合成单位，未校准为游戏米数。自身声源绑定听者，方位不适用。</p>
+  </div>
+  <div>
+    <div class="value" id="time" aria-live="off">0.0 / 30.0 秒</div>
+    <table><thead><tr><th>声源</th><th>当前动作</th><th>方位 / 远近</th></tr></thead><tbody id="actors"></tbody></table>
+    <p class="note" id="limitation"></p>
+  </div>
+</div>
+<details open><summary>动作时间表</summary><table><thead><tr><th>声源</th><th>时间</th><th>动作</th></tr></thead><tbody id="timeline"></tbody></table></details>
+</main>
+<script>
+/*__SCENE_DATA__*/
+(() => {
+  const root = document.getElementById('motion-review');
+  const player = root.querySelector('#player');
+  const selector = root.querySelector('#sample');
+  const map = root.querySelector('#map');
+  const colors = ['#318acc','#d98729','#9c70d4'];
+  const sectors = ['正前','右前','右侧','右后','正后','左后','左侧','左前'];
+  const actorNames = ['脚步','车辆','枪声'];
+  let current = null, animation = 0, scale = 1;
+  const pointAt = (track, time) => {
+    const q = Math.min(time / .05, track.points.length - 1);
+    const i = Math.floor(q), j = Math.min(i + 1, track.points.length - 1), u = q - i;
+    return track.points[i].map((v,k) => k < 5 ? v + (track.points[j][k] - v) * u : v);
+  };
+  const position = (point) => [320 + point[0] * scale, 200 - point[1] * scale];
+  function state(track,time,p) {
+    if (track.cls === 0) return p[4] < .15 ? '停步' : p[4] < 2.4 ? '行走' : p[4] < 4.8 ? '跑步' : '冲刺';
+    if (track.cls === 2) return '枪手位置固定';
+    const life = track.lifecycle;
+    if(time < life.startup_seconds || time >= life.engine_end_seconds) return '熄火静止';
+    if(time < track.startupEnd) return '发动机启动';
+    if(time >= life.shutdown_seconds) return '发动机熄火';
+    if(p[4] < .15) return '停车怠速';
+    return ['停车怠速','加速','巡航','减速','刹车'][p[5]];
+  }
+  function draw() {
+    if (!current) return;
+    const time = Math.min(player.currentTime || 0,30);
+    root.querySelector('#time').textContent = time.toFixed(1) + ' / 30.0 秒';
+    const grid = '<line x1="20" y1="200" x2="620" y2="200" stroke="currentColor" opacity=".13"/><line x1="320" y1="24" x2="320" y2="376" stroke="currentColor" opacity=".13"/><text x="320" y="20" text-anchor="middle">正前 ↑</text><text x="21" y="190">左</text><text x="604" y="190">右</text><text x="320" y="393" text-anchor="middle">正后</text>';
+    let svg = grid;
+    for(const radius of [Math.sqrt(240), Math.sqrt(2700)]) {
+      if(radius * scale < 175) svg += `<circle cx="320" cy="200" r="${radius*scale}" fill="none" stroke="currentColor" opacity=".12"/>`;
+    }
+    let html = '';
+    current.tracks.forEach((track,index) => {
+      const p = pointAt(track,time), xy = position(p), color = colors[track.cls];
+      const full = track.points.map(point => position(point).join(',')).join(' ');
+      const done = track.points.slice(0, Math.floor(time/.05)+1).map(point => position(point).join(',')).concat([xy.join(',')]).join(' ');
+      svg += track.own ? `<circle cx="320" cy="200" r="13" fill="none" stroke="${color}" stroke-width="3"/><text x="320" y="251" text-anchor="middle">自身${actorNames[track.cls]}</text>` : `<polyline points="${full}" fill="none" stroke="${color}" opacity=".23" stroke-width="2"/><polyline points="${done}" fill="none" stroke="${color}" stroke-width="3"/><circle cx="${xy[0]}" cy="${xy[1]}" r="6" fill="${color}"/><text x="${xy[0]+(p[0]<0?-10:10)}" y="${xy[1]+(p[1]<0?20:-12)}" text-anchor="${p[0]<0?'end':'start'}">${actorNames[track.cls]}${index+1}</text>`;
+      // Recompute angle from interpolated Cartesian positions, avoiding 359→0 interpolation.
+      const azimuth = (Math.atan2(p[0],p[1])*180/Math.PI+360)%360;
+      const direction = sectors[Math.floor((azimuth+22.5)/45)%8];
+      const distance = Math.hypot(p[0],p[1]);
+      const range = distance < Math.sqrt(240) ? '近' : distance < Math.sqrt(2700) ? '中' : '远';
+      const frame = Math.floor((time-.032)/.01);
+      const sounding = frame >= 0 && track.activity[Math.min(frame,track.activity.length-1)];
+      const where = track.own ? '自身 · 位置 0<br>方位不适用' : `${direction} ${azimuth.toFixed(0)}°<br>${range} · ${distance.toFixed(1)}`;
+      html += `<tr><td><span class="actor" style="border-color:${color}">${track.name}</span></td><td>${state(track,time,p)}<br><span class="small">${sounding?'当前发声':'当前无声'}</span></td><td>${where}</td></tr>`;
+    });
+    svg += '<circle cx="320" cy="200" r="6" fill="currentColor"/><path d="M 315 183 L 320 175 L 325 183 Z" fill="currentColor"/><text x="320" y="223" text-anchor="middle">听者</text>';
+    map.innerHTML = svg;
+    root.querySelector('#actors').innerHTML = html;
+  }
+  function tick() { draw(); if(!player.paused && !player.ended) animation = requestAnimationFrame(tick); }
+  function choose() {
+    cancelAnimationFrame(animation); player.pause();
+    current = sceneData[Number(selector.value)];
+    player.src = current.audio; player.currentTime = 0; player.load();
+    const csvLink = root.querySelector('#frame-csv');
+    csvLink.hidden = !current.frameCsv;
+    if(current.frameCsv) csvLink.href = current.frameCsv;
+    let extent = 25;
+    for(const t of current.tracks) for(const p of t.points) extent = Math.max(extent,Math.abs(p[0]),Math.abs(p[1]));
+    scale = 160 / extent;
+    root.querySelector('#limitation').textContent = (current.tracks.some(t=>t.own) ? '自身身份来自生成标注，不由距离阈值决定；自身脚步为原点合成近似，自身枪声及车辆启停保留客户端第一人称素材。' : '') + (current.tracks.some(t=>t.cls===1)
+      ? '车辆启动、熄火使用客户端原声；发动机加减速的转速变化为合成近似，尚未还原游戏的 REV 引擎模型。'
+      : '左右脚表示交替节奏；两侧均使用同一地面的原声变体。原始文件未标注左右脚，当前声音仍需试听确认。');
+    root.querySelector('#timeline').innerHTML = current.timeline.map(r=>`<tr><td>${r[0]}</td><td>${r[1]}</td><td>${r[2]}</td></tr>`).join('');
+    draw();
+  }
+  sceneData.forEach((scene,index)=>{ const option=document.createElement('option'); option.value=index; option.textContent=scene.id+' · '+scene.title; selector.appendChild(option); });
+  selector.addEventListener('change',choose);
+  player.addEventListener('play',()=>{ cancelAnimationFrame(animation); tick(); });
+  player.addEventListener('pause',()=>{ cancelAnimationFrame(animation); draw(); });
+  for(const name of ['seeked','timeupdate','loadedmetadata','ended']) player.addEventListener(name,draw);
+  choose();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,256 @@
+{
+  "model_id": "pubg_binaural_cnn_tcn_v1",
+  "audit_kind": "analytical_from_spec_not_framework_execution",
+  "trainable_parameters": 1243855,
+  "fp32_trainable_weight_bytes": 4975420,
+  "macs_per_feature_frame": 1632512,
+  "macs_per_audio_second_with_state_cache": 163251200,
+  "macs_per_four_new_frame_call": 6530048,
+  "past_feature_frames": 134,
+  "receptive_field_feature_frames": 135,
+  "audio_receptive_span_ms": 1372.0,
+  "cnn_tcn_state_cache_float32_elements": 43776,
+  "cnn_tcn_state_cache_bytes": 175104,
+  "excluded_from_macs": [
+    "FFT and resampler",
+    "mel projection",
+    "normalization and activation",
+    "memory movement",
+    "postprocessing"
+  ],
+  "excluded_from_weight_bytes": [
+    "batch_norm_running_statistics",
+    "serialization_metadata",
+    "activations",
+    "runtime_and_device_buffers"
+  ],
+  "excluded_from_state_cache": [
+    "frontend_resampler_and_STFT_state",
+    "working_activations",
+    "runtime_buffers"
+  ],
+  "latency_and_accuracy": "not_measured; no_model_implementation_or_weights_yet",
+  "layers": [
+    {
+      "name": "semantic.stem",
+      "output_shape": [
+        "B",
+        24,
+        "T",
+        48
+      ],
+      "trainable_parameters": 480,
+      "macs_per_feature_frame": 20736
+    },
+    {
+      "name": "semantic.ds1",
+      "output_shape": [
+        "B",
+        48,
+        "T",
+        24
+      ],
+      "trainable_parameters": 1512,
+      "macs_per_feature_frame": 32832
+    },
+    {
+      "name": "semantic.ds2",
+      "output_shape": [
+        "B",
+        96,
+        "T",
+        12
+      ],
+      "trainable_parameters": 5328,
+      "macs_per_feature_frame": 60480
+    },
+    {
+      "name": "semantic.ds3",
+      "output_shape": [
+        "B",
+        128,
+        "T",
+        6
+      ],
+      "trainable_parameters": 13600,
+      "macs_per_feature_frame": 78912
+    },
+    {
+      "name": "semantic.projection",
+      "output_shape": [
+        "B",
+        "T",
+        128
+      ],
+      "trainable_parameters": 98432,
+      "macs_per_feature_frame": 98304
+    },
+    {
+      "name": "spatial.stem",
+      "output_shape": [
+        "B",
+        16,
+        "T",
+        128
+      ],
+      "trainable_parameters": 992,
+      "macs_per_feature_frame": 122880
+    },
+    {
+      "name": "spatial.ds1",
+      "output_shape": [
+        "B",
+        32,
+        "T",
+        32
+      ],
+      "trainable_parameters": 848,
+      "macs_per_feature_frame": 24064
+    },
+    {
+      "name": "spatial.ds2",
+      "output_shape": [
+        "B",
+        64,
+        "T",
+        16
+      ],
+      "trainable_parameters": 2528,
+      "macs_per_feature_frame": 37376
+    },
+    {
+      "name": "spatial.ds3",
+      "output_shape": [
+        "B",
+        96,
+        "T",
+        8
+      ],
+      "trainable_parameters": 7040,
+      "macs_per_feature_frame": 53760
+    },
+    {
+      "name": "spatial.projection",
+      "output_shape": [
+        "B",
+        "T",
+        128
+      ],
+      "trainable_parameters": 98432,
+      "macs_per_feature_frame": 98304
+    },
+    {
+      "name": "fusion",
+      "output_shape": [
+        "B",
+        "T",
+        192
+      ],
+      "trainable_parameters": 49728,
+      "macs_per_feature_frame": 49536
+    },
+    {
+      "name": "tcn.dilation_1",
+      "output_shape": [
+        "B",
+        "T",
+        192
+      ],
+      "trainable_parameters": 149568,
+      "macs_per_feature_frame": 148032
+    },
+    {
+      "name": "tcn.dilation_2",
+      "output_shape": [
+        "B",
+        "T",
+        192
+      ],
+      "trainable_parameters": 149568,
+      "macs_per_feature_frame": 148032
+    },
+    {
+      "name": "tcn.dilation_4",
+      "output_shape": [
+        "B",
+        "T",
+        192
+      ],
+      "trainable_parameters": 149568,
+      "macs_per_feature_frame": 148032
+    },
+    {
+      "name": "tcn.dilation_8",
+      "output_shape": [
+        "B",
+        "T",
+        192
+      ],
+      "trainable_parameters": 149568,
+      "macs_per_feature_frame": 148032
+    },
+    {
+      "name": "tcn.dilation_16",
+      "output_shape": [
+        "B",
+        "T",
+        192
+      ],
+      "trainable_parameters": 149568,
+      "macs_per_feature_frame": 148032
+    },
+    {
+      "name": "tcn.dilation_32",
+      "output_shape": [
+        "B",
+        "T",
+        192
+      ],
+      "trainable_parameters": 149568,
+      "macs_per_feature_frame": 148032
+    },
+    {
+      "name": "head.activity",
+      "output_shape": [
+        "B",
+        "T",
+        4,
+        8
+      ],
+      "trainable_parameters": 28832,
+      "macs_per_feature_frame": 28672
+    },
+    {
+      "name": "head.range",
+      "output_shape": [
+        "B",
+        "T",
+        4,
+        8,
+        3
+      ],
+      "trainable_parameters": 37344,
+      "macs_per_feature_frame": 37120
+    },
+    {
+      "name": "head.class_aux",
+      "output_shape": [
+        "B",
+        "T",
+        4
+      ],
+      "trainable_parameters": 772,
+      "macs_per_feature_frame": 768
+    },
+    {
+      "name": "head.self_activity",
+      "output_shape": [
+        "B",
+        "T",
+        3
+      ],
+      "trainable_parameters": 579,
+      "macs_per_feature_frame": 576
+    }
+  ]
+}

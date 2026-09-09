@@ -1,0 +1,530 @@
+{
+  "schema_version": 1,
+  "model_id": "pubg_binaural_cnn_tcn_v1",
+  "status": "accepted_prototype_architecture_not_trained",
+  "design_date": "2026-09-06",
+  "task": "framewise_external_class_sector_activity_coarse_range_and_self_activity",
+  "labels": {
+    "classes": [
+      "footsteps",
+      "ground_water_vehicle",
+      "gunfire",
+      "transport_aircraft"
+    ],
+    "class_names_zh": [
+      "脚步",
+      "车船",
+      "枪声",
+      "运输飞机"
+    ],
+    "azimuth_degrees_clockwise_from_front": [
+      0,
+      45,
+      90,
+      135,
+      180,
+      225,
+      270,
+      315
+    ],
+    "sector_names_zh": [
+      "前",
+      "右前",
+      "右",
+      "右后",
+      "后",
+      "左后",
+      "左",
+      "左前"
+    ],
+    "sector_width_degrees": 45,
+    "range_names": [
+      "near",
+      "mid",
+      "far"
+    ],
+    "range_names_zh": [
+      "近",
+      "中",
+      "远"
+    ],
+    "range_units": "synthetic_perceptual_bins_not_meters",
+    "same_class_same_sector_policy": "merge_activity; mask_range_loss_if_active_sources_have_different_range_labels",
+    "background_policy": "all_target_activity_cells_zero; no_mutually_exclusive_background_class",
+    "source_roles": [
+      "external",
+      "self"
+    ],
+    "self_classes": [
+      "footsteps",
+      "occupied_vehicle",
+      "gunfire"
+    ],
+    "self_identity": "explicit_simulator_provenance_not_a_near_distance_threshold",
+    "activity_scope": "external_sources_only",
+    "range_scope": "external_active_unambiguous_cells_only",
+    "class_aux_scope": "union_of_external_and_self_class_activity",
+    "self_direction": "undefined; do_not_assign_a_sector_or_train_direction_for_self"
+  },
+  "frontend": {
+    "sample_rate_hz": 32000,
+    "waveform_channels": 2,
+    "channel_order": [
+      "left",
+      "right"
+    ],
+    "sample_format": "float32_pcm_minus1_to1",
+    "stft": {
+      "n_fft": 1024,
+      "window_samples": 1024,
+      "hop_samples": 320,
+      "window": "periodic_hann",
+      "center": false,
+      "timestamp": "right_edge_of_analysis_window",
+      "spectrum_scale": "divide_complex_fft_by_sum_window",
+      "power_floor": 1e-10
+    },
+    "semantic": {
+      "features": [
+        "left_log_mel_power",
+        "right_log_mel_power"
+      ],
+      "mel_bins": 96,
+      "mel_scale": "htk",
+      "filter_normalization": "each_discrete_triangle_sums_to_one",
+      "fmin_hz": 50,
+      "fmax_hz": 15000,
+      "normalization": "fixed_training_split_mean_std_per_band_shared_between_ears"
+    },
+    "spatial": {
+      "features": [
+        "mean_log_power",
+        "ild_div30_clipped",
+        "masked_cos_ipd",
+        "masked_sin_ipd"
+      ],
+      "fft_bins_inclusive": [
+        1,
+        512
+      ],
+      "frequency_bins": 512,
+      "cross_spectrum": "X_left_times_conjugate_X_right",
+      "ild_clip_db": 30,
+      "phase_validity": "both_channel_powers_above_power_floor_else_set_both_phase_features_zero",
+      "mean_log_power_normalization": "fixed_training_split_mean_std_per_frequency",
+      "phase_aggregation": "none; retain_linear_frequency_bins"
+    },
+    "level_features": {
+      "channels": 2,
+      "features": [
+        "left_window_log_mean_square",
+        "right_window_log_mean_square"
+      ],
+      "scaling": "10log10(mean(x_squared)+power_floor)/100; no_clipwise_normalization"
+    },
+    "resampling": "one_stateful_common_filter_and_timebase_for_both_channels; account_for_filter_delay",
+    "per_clip_or_per_channel_gain_normalization": false
+  },
+  "cnn_conventions": {
+    "tensor_layout": "B,C,T,F",
+    "kernel_stride_order": "time,frequency",
+    "time_padding": "left_only_k_minus1",
+    "frequency_padding_each_side": "floor((kernel_f_minus1)/2)",
+    "bias": false,
+    "normalization": "batch_norm_after_each_convolution; frozen_running_statistics_for_eval_and_export",
+    "activation": "relu_after_each_normalization",
+    "global_time_pooling": false,
+    "preserve_frequency_order_at_projection": true
+  },
+  "branches": [
+    {
+      "name": "semantic",
+      "input_channels": 2,
+      "input_frequency_bins": 96,
+      "layers": [
+        {
+          "name": "stem",
+          "type": "conv2d",
+          "out_channels": 24,
+          "kernel": [
+            3,
+            3
+          ],
+          "stride": [
+            1,
+            2
+          ]
+        },
+        {
+          "name": "ds1",
+          "type": "depthwise_pointwise",
+          "out_channels": 48,
+          "kernel": [
+            3,
+            3
+          ],
+          "stride": [
+            1,
+            2
+          ]
+        },
+        {
+          "name": "ds2",
+          "type": "depthwise_pointwise",
+          "out_channels": 96,
+          "kernel": [
+            3,
+            3
+          ],
+          "stride": [
+            1,
+            2
+          ]
+        },
+        {
+          "name": "ds3",
+          "type": "depthwise_pointwise",
+          "out_channels": 128,
+          "kernel": [
+            3,
+            3
+          ],
+          "stride": [
+            1,
+            2
+          ]
+        }
+      ],
+      "projection": {
+        "type": "flatten_frequency_then_linear",
+        "out_features": 128,
+        "bias": true,
+        "activation": "relu"
+      }
+    },
+    {
+      "name": "spatial",
+      "input_channels": 4,
+      "input_frequency_bins": 512,
+      "layers": [
+        {
+          "name": "stem",
+          "type": "conv2d",
+          "out_channels": 16,
+          "kernel": [
+            3,
+            5
+          ],
+          "stride": [
+            1,
+            4
+          ]
+        },
+        {
+          "name": "ds1",
+          "type": "depthwise_pointwise",
+          "out_channels": 32,
+          "kernel": [
+            3,
+            5
+          ],
+          "stride": [
+            1,
+            4
+          ]
+        },
+        {
+          "name": "ds2",
+          "type": "depthwise_pointwise",
+          "out_channels": 64,
+          "kernel": [
+            3,
+            3
+          ],
+          "stride": [
+            1,
+            2
+          ]
+        },
+        {
+          "name": "ds3",
+          "type": "depthwise_pointwise",
+          "out_channels": 96,
+          "kernel": [
+            3,
+            3
+          ],
+          "stride": [
+            1,
+            2
+          ]
+        }
+      ],
+      "projection": {
+        "type": "flatten_frequency_then_linear",
+        "out_features": 128,
+        "bias": true,
+        "activation": "relu"
+      }
+    }
+  ],
+  "fusion": {
+    "type": "linear",
+    "include_level_features": true,
+    "out_features": 192,
+    "bias": true,
+    "activation": "relu"
+  },
+  "temporal": {
+    "type": "causal_residual_depthwise_tcn",
+    "channels": 192,
+    "expansion_channels": 384,
+    "kernel_size": 3,
+    "dilations": [
+      1,
+      2,
+      4,
+      8,
+      16,
+      32
+    ],
+    "convolutions_per_block": [
+      "causal_depthwise_k3",
+      "pointwise_expand",
+      "pointwise_project"
+    ],
+    "bias": false,
+    "normalization": "batch_norm_after_each_convolution; frozen_running_statistics_for_eval_and_export",
+    "activation": "relu_after_depthwise_and_expand; relu_after_residual_sum",
+    "dropout_before_residual_sum": 0.1
+  },
+  "heads": [
+    {
+      "name": "activity",
+      "hidden_features": 128,
+      "append_level_features": false,
+      "output_dimensions_per_frame": [
+        4,
+        8
+      ],
+      "activation": "independent_sigmoid",
+      "hidden_activation": "relu",
+      "bias": true
+    },
+    {
+      "name": "range",
+      "hidden_features": 128,
+      "append_level_features": true,
+      "output_dimensions_per_frame": [
+        4,
+        8,
+        3
+      ],
+      "activation": "softmax_on_range_axis_only",
+      "hidden_activation": "relu",
+      "bias": true
+    },
+    {
+      "name": "class_aux",
+      "hidden_features": null,
+      "append_level_features": false,
+      "output_dimensions_per_frame": [
+        4
+      ],
+      "activation": "independent_sigmoid",
+      "bias": true,
+      "purpose": "training_and_diagnostics; do_not_override_activity_cells_at_runtime"
+    },
+    {
+      "name": "self_activity",
+      "hidden_features": null,
+      "append_level_features": false,
+      "output_dimensions_per_frame": [
+        3
+      ],
+      "activation": "independent_sigmoid",
+      "bias": true,
+      "purpose": "independent_self_presence; never_suppress_all_near_external_detections"
+    }
+  ],
+  "loss_initial_weights": {
+    "activity_weighted_binary_cross_entropy": 1.0,
+    "active_unambiguous_range_cross_entropy": 0.2,
+    "class_aux_binary_cross_entropy": 0.2,
+    "activity_positive_weight": "computed_from_training_split_only; capped_at_20",
+    "normalization": "each_loss_averages_its_own_valid_elements; zero_when_no_valid_range_elements",
+    "status": "starting_hyperparameters_to_select_on_validation_only",
+    "self_activity_weighted_binary_cross_entropy": 0.5
+  },
+  "streaming": {
+    "feature_hop_ms": 10,
+    "new_frames_per_call": 4,
+    "nominal_call_interval_ms": 40,
+    "network_future_lookahead_frames": 0,
+    "outputs": "all_new_frames_with_audio_timestamps",
+    "cnn_cache": "per_layer_past_inputs; never_future_pad",
+    "tcn_cache": "per_block_2_times_dilation_past_inputs",
+    "reset_on": [
+      "audio_device_change",
+      "sample_rate_change",
+      "audio_discontinuity"
+    ],
+    "latency_status": "unmeasured; context_length_is_not_algorithmic_delay"
+  },
+  "training_data": {
+    "accepted_pilot_recipe": "outputs/audio-pilot-20260906-01a07460/生成参数基准_v1.json",
+    "pilot_role": "listening_and_regression_anchor; not_an_independent_generalization_test",
+    "split_before_augmentation_by": [
+      "underlying_original_media_family",
+      "recording_session"
+    ],
+    "default_seed": 20260906,
+    "source_split_ratios": [
+      0.8,
+      0.1,
+      0.1
+    ],
+    "first_recipe_count_budget": {
+      "status": "superseded_by_generated_dataset",
+      "original_design_budget": {
+        "single_source": 4000,
+        "mixed_two_or_three_sources": 6000,
+        "no_target": 2000
+      }
+    },
+    "storage": "materialized_PCM16_WAV_and_NPZ_labels; retain_seeded_recipes_and_original_sources",
+    "missing_before_four_class_training": [
+      "verified_transport_aircraft_sources",
+      "background_and_confuser_sources"
+    ],
+    "augmentation": "waveform_domain_mixing; source_timing_jitter; common_stereo_gain; sector_balance; optional_small_shared_eq; derive_labels_from_rendered_source_tracks",
+    "generated_dataset": {
+      "path": "datasets/audio-synthetic-20260906-v3",
+      "generator": "tools/audio/generate_self_audio_dataset.py",
+      "status": "rendered_and_verified",
+      "listening_acceptance": "pending_for_v3_far_self_and_engine_approximation",
+      "clip_seconds": 30,
+      "clip_counts": {
+        "train": 2400,
+        "validation": 300,
+        "test": 300
+      },
+      "hours": {
+        "train": 20,
+        "validation": 2.5,
+        "test": 2.5
+      },
+      "class_supervision_mask": [
+        1,
+        1,
+        1,
+        0
+      ],
+      "external_initial_range_probabilities": [
+        0.1,
+        0.1,
+        0.8
+      ],
+      "measured_far_external_active_track_frame_fraction": 0.867907693865921,
+      "density_probabilities": {
+        "low": 0.4,
+        "medium": 0.35,
+        "high": 0.25
+      },
+      "motion_labels": true,
+      "self_labels": true,
+      "self_scene_counts_per_class": [
+        750,
+        750,
+        750
+      ],
+      "foot_surface_fixed_per_track": true,
+      "native_rev_engine_rendered": false,
+      "crop_rule": "Crop waveform and labels together; all crops from a scene stay in its original split."
+    },
+    "previous_generated_datasets": [
+      {
+        "path": "datasets/audio-synthetic-20260906-v1",
+        "config": "tools/audio/mix_dataset_v1.json",
+        "status": "rendered_and_verified",
+        "clip_counts": {
+          "train": 12000,
+          "validation": 1500,
+          "test": 1500
+        },
+        "hours": {
+          "train": 20,
+          "validation": 2.5,
+          "test": 2.5
+        },
+        "class_supervision_mask": [
+          1,
+          1,
+          1,
+          0
+        ],
+        "distance_probabilities": [
+          0.1,
+          0.25,
+          0.65
+        ],
+        "density_probabilities": {
+          "low": 0.4,
+          "medium": 0.35,
+          "high": 0.25
+        }
+      },
+      {
+        "path": "datasets/audio-synthetic-20260906-v2",
+        "generator": "tools/audio/generate_motion_dataset.py",
+        "status": "rendered_and_verified",
+        "listening_acceptance": "pending_for_v2_motion_and_engine_approximation",
+        "clip_seconds": 30,
+        "clip_counts": {
+          "train": 2400,
+          "validation": 300,
+          "test": 300
+        },
+        "hours": {
+          "train": 20.0,
+          "validation": 2.5,
+          "test": 2.5
+        },
+        "class_supervision_mask": [
+          1,
+          1,
+          1,
+          0
+        ],
+        "initial_distance_probabilities": [
+          0.1,
+          0.25,
+          0.65
+        ],
+        "measured_far_active_track_frame_fraction": 0.7618331494287527,
+        "density_probabilities": {
+          "low": 0.4,
+          "medium": 0.35,
+          "high": 0.25
+        },
+        "motion_labels": true,
+        "foot_surface_fixed_per_track": true,
+        "native_rev_engine_rendered": false,
+        "crop_rule": "Crop waveform and labels together; all crops from a scene stay in its original split."
+      }
+    ],
+    "own_sound_requirements": {
+      "labels": [
+        "self_activity",
+        "self_activity_loss_mask",
+        "track_source_role",
+        "track_direction_valid"
+      ],
+      "counterexamples": "near_external_sources_remain_external; include_own_plus_external_same_class",
+      "masks": "apply_activity_loss_mask_and_range_loss_mask; ignore_inaudible_positive_targets",
+      "real_validation": "required_before_claiming_self_recognition; centred_footsteps_and_idle_engine_are_approximations",
+      "split": "Local_and_Remote_versions_of_a_weapon_share_the_same_family_split"
+    }
+  },
+  "revision": "20260906_v3_self_supervision"
+}

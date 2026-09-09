@@ -1,0 +1,74 @@
+{
+  "status": "passed",
+  "checked_wav_files": 15000,
+  "checked_label_files": 15000,
+  "hours": 25.0,
+  "split_counts": {
+    "train": 12000,
+    "validation": 1500,
+    "test": 1500
+  },
+  "source_pcm_hash_overlap_between_splits": 0,
+  "source_groups_disjoint": true,
+  "wav_and_label_hashes_verified": true,
+  "no_output_clipping": true,
+  "aircraft_supervision_disabled": true,
+  "label_property_checks_passed": true,
+  "reproduced_pcm_identical": [
+    "train_000003",
+    "train_000001",
+    "train_000009",
+    "validation_000005",
+    "validation_000001",
+    "validation_000004",
+    "test_000001",
+    "test_000011",
+    "test_000003"
+  ],
+  "far_source_track_fraction": 0.6499749310604162,
+  "distance_track_counts": {
+    "近": 3192,
+    "中": 7978,
+    "远": 20742
+  },
+  "measured_density": {
+    "train/low": {
+      "active_fraction": 0.1399148520379676,
+      "overlap_fraction": 0.00443606923506421
+    },
+    "train/medium": {
+      "active_fraction": 0.6120662837999521,
+      "overlap_fraction": 0.209872377761825
+    },
+    "train/high": {
+      "active_fraction": 0.9552021217197096,
+      "overlap_fraction": 0.7859782244556114
+    },
+    "validation/low": {
+      "active_fraction": 0.13802065884980458,
+      "overlap_fraction": 0.0036850921273031824
+    },
+    "validation/medium": {
+      "active_fraction": 0.5857126904363086,
+      "overlap_fraction": 0.18131291377522532
+    },
+    "validation/high": {
+      "active_fraction": 0.9503160245672808,
+      "overlap_fraction": 0.7213713009491904
+    },
+    "test/low": {
+      "active_fraction": 0.17021496370742603,
+      "overlap_fraction": 0.00621998883305416
+    },
+    "test/medium": {
+      "active_fraction": 0.7249836484007338,
+      "overlap_fraction": 0.31879396984924624
+    },
+    "test/high": {
+      "active_fraction": 0.9766700167504188,
+      "overlap_fraction": 0.9160558347292016
+    }
+  },
+  "audio_and_label_bytes": 15934083912,
+  "limitation": "These checks verify synthesis, labels and split integrity; not real-game recognition accuracy."
+}

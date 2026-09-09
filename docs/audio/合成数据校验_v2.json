@@ -1,0 +1,70 @@
+{
+  "status": "passed",
+  "wav_files": 3000,
+  "label_files": 3000,
+  "total_hours": 25.0,
+  "audio_and_label_bytes": 16043592055,
+  "checked_footstep_tracks": 2127,
+  "checked_foot_contacts": 87507,
+  "checked_vehicle_tracks": 2157,
+  "checked_moving_tracks": 4284,
+  "same_surface_for_both_feet": true,
+  "preserved_phase_across_pauses": true,
+  "trajectories_and_frame_labels_match": true,
+  "native_vehicle_actions_verified": true,
+  "proprietary_rev_engine_rendered": false,
+  "engine_render_is_documented_approximation": true,
+  "source_pcm_shared_between_splits": 0,
+  "no_output_clipping": true,
+  "aircraft_supervision_disabled": true,
+  "reproduced_pcm_and_labels_identical": [
+    "train_000002",
+    "train_000009",
+    "train_000001",
+    "validation_000001",
+    "validation_000002",
+    "validation_000004",
+    "test_000004",
+    "test_000002",
+    "test_000001"
+  ],
+  "measured_density": {
+    "train/low": {
+      "active_fraction": 0.190649677455233,
+      "overlap_fraction": 0.0039574296518740965
+    },
+    "train/medium": {
+      "active_fraction": 0.7209586570697681,
+      "overlap_fraction": 0.24163925830592498
+    },
+    "train/high": {
+      "active_fraction": 0.968554665776888,
+      "overlap_fraction": 0.7517556445334224
+    },
+    "validation/low": {
+      "active_fraction": 0.195434323212101,
+      "overlap_fraction": 0.002825047269491714
+    },
+    "validation/medium": {
+      "active_fraction": 0.7142030919808697,
+      "overlap_fraction": 0.22602920380698158
+    },
+    "validation/high": {
+      "active_fraction": 0.9580914247580914,
+      "overlap_fraction": 0.6541608274941608
+    },
+    "test/low": {
+      "active_fraction": 0.18663941719497276,
+      "overlap_fraction": 0.004974418863307752
+    },
+    "test/medium": {
+      "active_fraction": 0.7943848610515277,
+      "overlap_fraction": 0.3828654050876273
+    },
+    "test/high": {
+      "active_fraction": 0.9854654654654654,
+      "overlap_fraction": 0.9167256145033923
+    }
+  },
+  "limitation": "Engineering verification, not a human listening acceptance or a model evaluation."
+}

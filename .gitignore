@@ -34,6 +34,14 @@ PUBGAssi.db*/
 datasets/audio-candidates/**/*.zip
 datasets/audio-candidates/**/*.zip.part
 
+# Locally generated audio datasets and derived render caches
+datasets/audio-synthetic-*/
+tools/audio/__pycache__/
+
+# Local listening previews and private conversation backups
+/outputs/
+/exports/
+
 # OS/editor noise
 .DS_Store
 Thumbs.db
